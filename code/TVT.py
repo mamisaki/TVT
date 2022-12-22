@@ -426,8 +426,8 @@ class ThermalDataMovie(DataMovie):
         for ii, frame in enumerate(thermal_data_array):
             progressDlg.setValue(len(frame_indices) + ii*0.1)
             progressDlg.repaint()
-            low, high = np.percentile(frame.ravel(), [2.5, 97.5])
-            gray_frame = np.tanh((frame - low) / (high - low) - 0.5) + 0.5
+            low, high = np.percentile(frame.ravel(), [10, 100])
+            gray_frame = (frame - low) / (high - low)
             gray_frame *= 255
             gray_frame[gray_frame < 0] = 0
             gray_frame[gray_frame > 255] = 255
