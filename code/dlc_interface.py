@@ -20,6 +20,7 @@ import shutil
 from pathlib import Path
 import io
 import subprocess
+import shlex
 import platform
 import socket
 import re
@@ -448,7 +449,7 @@ class DLCinter():
             pycmd += f'config_path = "{self._config_work_path}"; '
             pycmd += 'dlc.label_frames(config_path)'
             cmd = f"pythonw -c '{pycmd}'"
-            subprocess.run(cmd, shell=True)
+            subprocess.run(shlex.split(cmd))
         else:
             iof = io.StringIO()
             with redirect_stdout(iof):

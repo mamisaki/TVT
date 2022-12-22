@@ -401,11 +401,12 @@ class ThermalDataMovie(DataMovie):
             fname = Path(fname)
 
         # --- Get frame data --------------------------------------------------
-        frame_indices = np.arange(self.duration_frame, dtype=np.int)
+        frame_indices = np.arange(self.duration_frame, dtype=int)
 
         # Open progress dialog
         progressDlg = QProgressDialog('Reading thermal data ...',
-                                      'Cancel', 0, len(frame_indices)*1.1,
+                                      'Cancel', 0,
+                                      int(np.round(len(frame_indices)*1.1)),
                                       self.model.main_win)
         progressDlg.setWindowTitle("Export thermal data as a video file")
         progressDlg.setWindowModality(Qt.WindowModal)
@@ -424,7 +425,7 @@ class ThermalDataMovie(DataMovie):
         progressDlg.setLabelText('Convert to gray image ...')
         gray_data = np.empty_like(thermal_data_array, dtype=np.uint8)
         for ii, frame in enumerate(thermal_data_array):
-            progressDlg.setValue(len(frame_indices) + ii*0.1)
+            progressDlg.setValue(int(np.round(len(frame_indices) + ii*0.1)))
             progressDlg.repaint()
             low, high = np.percentile(frame.ravel(), [10, 100])
             gray_frame = (frame - low) / (high - low)
@@ -433,7 +434,7 @@ class ThermalDataMovie(DataMovie):
             gray_frame[gray_frame > 255] = 255
             gray_data[ii, :, :] = gray_frame.astype(np.uint8)
 
-        progressDlg.setValue(len(frame_indices)*1.1)
+        progressDlg.setValue(np.round(int(len(frame_indices)*1.1)))
         progressDlg.setLabelText('Save movie file ...')
         progressDlg.repaint()
 
@@ -1528,7 +1529,8 @@ class ThermalVideoModel(QObject):
                     tstr = re.sub(r'\..+$', '', tstr)
                     xtick_labs.append(tstr)
 
-            self.main_win.plot_ax.set_xticklabels(xtick_labs)
+            xticks = self.main_win.plot_ax.get_xticks()
+            self.main_win.plot_ax.set_xticks(xticks, xtick_labs)
 
         # --- Time line -------------------------------------------------------
         xpos = self.main_win.plot_xvals[self.thermalData.frame_position]
