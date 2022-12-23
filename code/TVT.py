@@ -708,7 +708,7 @@ class ThermalVideoModel(QObject):
     def openThermalFile(self, *args, fileName=None, **kwargs):
         if fileName is None:
             stdir = APP_ROOT / 'data'
-            filterStr = "Thermal data (*.csq)"
+            filterStr = "Thermal data (*.csq);;All files (*.*)"
             fileName, _ = QFileDialog.getOpenFileName(
                 self.main_win, "Open thermal file", str(stdir), filterStr,
                 None, QFileDialog.DontUseNativeDialog)
