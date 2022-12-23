@@ -664,7 +664,7 @@ class ThermalVideoModel(QObject):
         self.main_win.thermalDispImg.tracking_mark = self.tracking_mark
         self.editRange = 'current'
 
-        self.lpf = 0.1  # Hz
+        self.lpf = 0  # Hz, 0 == No filter
 
         # --- Common time (ms), movie parameters ------------------------------
         self.common_time_ms = 0
@@ -1529,7 +1529,6 @@ class ThermalVideoModel(QObject):
                     tstr = re.sub(r'\..+$', '', tstr)
                     xtick_labs.append(tstr)
 
-            xticks = self.main_win.plot_ax.get_xticks()
             self.main_win.plot_ax.set_xticks(xticks, xtick_labs)
 
         # --- Time line -------------------------------------------------------
@@ -1640,7 +1639,7 @@ class ThermalVideoModel(QObject):
                 xi0 = np.argwhere(
                     np.logical_not(
                         np.isnan(self.tracking_point[point].value_ts))).ravel()
-                if len(xi0):
+                if self.lpf > 0.0 and len(xi0) > 1:
                     y0 = self.tracking_point[point].value_ts[xi0]
                     lpf_ts = np.ones(
                         len(self.tracking_point[point].value_ts)) * np.nan
@@ -2625,7 +2624,8 @@ class MainWindow(QMainWindow):
         self.roi_LPF_thresh_spbx = QDoubleSpinBox()
         self.roi_LPF_thresh_spbx.setDecimals(5)
         self.roi_LPF_thresh_spbx.setSingleStep(0.001)
-        self.roi_LPF_thresh_spbx.setValue(0.025)
+        self.roi_LPF_thresh_spbx.setValue(0.0)
+        self.roi_LPF_thresh_spbx.setMinimum(0.0)
 
         self.roi_delete_btn = QPushButton('Delete this point')
         self.roi_delete_btn.setFixedHeight(18)
