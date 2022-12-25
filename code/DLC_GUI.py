@@ -2157,5 +2157,10 @@ if __name__ == '__main__':
     win.resize(890, 830)
     win.move(0, 0)
     win.show()
-    ret = app.exec_()
-    sys.exit(ret)
+    try:
+        ret = app.exec_()
+    except Exception as e:
+        print(e)
+        print(ret)
+
+    # sys.exit(ret)

@@ -449,7 +449,7 @@ class DLCinter():
             pycmd += f'config_path = "{self._config_work_path}"; '
             pycmd += 'dlc.label_frames(config_path)'
             cmd = f"pythonw -c '{pycmd}'"
-            subprocess.run(shlex.split(cmd))
+            subprocess.check_call(shlex.split(cmd))
         else:
             iof = io.StringIO()
             with redirect_stdout(iof):

@@ -622,7 +622,7 @@ class ThermalVideoModel(QObject):
     edit_point_signal = pyqtSignal(str)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def __init__(self, main_win):
+    def __init__(self, main_win, batchmode=False):
         super(ThermalVideoModel, self).__init__(parent=main_win)
 
         # main_win object
@@ -630,22 +630,22 @@ class ThermalVideoModel(QObject):
 
         # --- DataMovie objects -----------------------------------------------
         # Thermal data
-        thermal_UI_objs = {'frFwdBtn': self.main_win.thermalFrameFwdBtn,
-                           'frBkwBtn': self.main_win.thermalFrameBkwBtn,
-                           'skipFwdBtn': self.main_win.thermalSkipFwdBtn,
-                           'skipBkwBtn': self.main_win.thermalSkipBkwBtn,
-                           'positionLabel': self.main_win.thermalPositionLab,
-                           'syncBtn': self.main_win.syncVideoBtn}
-        self.thermalData = ThermalDataMovie(self, self.main_win.thermalDispImg,
-                                            thermal_UI_objs)
+        if self.main_win is not None:
+            thermal_UI_objs = {'frFwdBtn': self.main_win.thermalFrameFwdBtn,
+                            'frBkwBtn': self.main_win.thermalFrameBkwBtn,
+                            'skipFwdBtn': self.main_win.thermalSkipFwdBtn,
+                            'skipBkwBtn': self.main_win.thermalSkipBkwBtn,
+                            'positionLabel': self.main_win.thermalPositionLab,
+                            'syncBtn': self.main_win.syncVideoBtn}
+            self.thermalData = ThermalDataMovie(self, self.main_win.thermalDispImg,
+                                                thermal_UI_objs)
 
-        # Video data
-        video_UI_objs = {'frFwdBtn': self.main_win.videoFrameFwdBtn,
-                         'frBkwBtn': self.main_win.videoFrameBkwBtn,
-                         'skipFwdBtn': self.main_win.videoSkipFwdBtn,
-                         'skipBkwBtn': self.main_win.videoSkipBkwBtn,
-                         'positionLabel': self.main_win.videoPositionLab,
-                         'syncBtn': self.main_win.syncVideoBtn}
+            video_UI_objs = {'frFwdBtn': self.main_win.videoFrameFwdBtn,
+                            'frBkwBtn': self.main_win.videoFrameBkwBtn,
+                            'skipFwdBtn': self.main_win.videoSkipFwdBtn,
+                            'skipBkwBtn': self.main_win.videoSkipBkwBtn,
+                            'positionLabel': self.main_win.videoPositionLab,
+                            'syncBtn': self.main_win.syncVideoBtn}
         self.videoData = VideoDataMovie(self, self.main_win.videoDispImg,
                                         video_UI_objs)
 
@@ -655,13 +655,15 @@ class ThermalVideoModel(QObject):
 
         # Point marker (black dot) position
         self.point_mark_xy = [0, 0]
-        self.main_win.videoDispImg.point_mark_xy = self.point_mark_xy
-        self.main_win.thermalDispImg.point_mark_xy = self.point_mark_xy
+        if self.main_win is not None:
+            self.main_win.videoDispImg.point_mark_xy = self.point_mark_xy
+            self.main_win.thermalDispImg.point_mark_xy = self.point_mark_xy
 
         # --- Tracking point --------------------------------------------------
         self.tracking_mark = dict()  # tracking point marks on display
-        self.main_win.videoDispImg.tracking_mark = self.tracking_mark
-        self.main_win.thermalDispImg.tracking_mark = self.tracking_mark
+        if self.main_win is not None:
+            self.main_win.videoDispImg.tracking_mark = self.tracking_mark
+            self.main_win.thermalDispImg.tracking_mark = self.tracking_mark
         self.editRange = 'current'
 
         self.lpf = 0  # Hz, 0 == No filter
@@ -671,10 +673,11 @@ class ThermalVideoModel(QObject):
         self.on_sync = False
 
         # timer for movie play
-        self.play_timer = QTimer(self)
-        self.play_timer.setSingleShot(True)
-        self.play_timer.timeout.connect(self.play_update)
-        self.play_frame_interval_ms = np.inf
+        if self.main_win is not None:
+            self.play_timer = QTimer(self)
+            self.play_timer.setSingleShot(True)
+            self.play_timer.timeout.connect(self.play_update)
+            self.play_frame_interval_ms = np.inf
 
         # --- Time marker -----------------------------------------------------
         self.time_marker = {}
@@ -690,18 +693,34 @@ class ThermalVideoModel(QObject):
         self.edit_point_signal.connect(self.edit_tracking_point)
 
         # --- Load last working status ----------------------------------------
+        self.loaded_state_f = None
+        self.tmp_state_f = APP_ROOT / 'config' / 'tmp_working_state.pkl'
         self.num_saved_setting_hist = 5
         last_state_f = APP_ROOT / 'config' / 'last_working_state-0.pkl'
         if not last_state_f.parent.is_dir():
             last_state_f.parent.mkdir()
 
-        if last_state_f.is_file():
-            ret = QMessageBox.question(self.main_win, "Load last state",
-                                       "Retrieve the last working state?",
-                                       QMessageBox.Yes | QMessageBox.No,
-                                       )
-            if ret == QMessageBox.Yes:
-                self.load_status(fname=last_state_f)
+        if not batchmode:
+            self.save_timer = QTimer()
+            self.save_timer.setSingleShot(True)
+            self.save_timer.timeout.connect(self.save_tmp_status)
+            self.save_tmp_wait = 60  # seconds
+            self.save_timer.start(self.save_tmp_wait * 1000)
+
+            if self.tmp_state_f.is_file():
+                ret = QMessageBox.question(self.main_win, "Recover state",
+                                        "Recover the last aborted state?",
+                                        QMessageBox.Yes | QMessageBox.No,
+                                        )
+                if ret == QMessageBox.Yes:
+                    self.load_status(fname=self.tmp_state_f)
+            elif last_state_f.is_file():
+                ret = QMessageBox.question(self.main_win, "Load last state",
+                                        "Retrieve the last working state?",
+                                        QMessageBox.Yes | QMessageBox.No,
+                                        )
+                if ret == QMessageBox.Yes:
+                    self.load_status(fname=last_state_f)
 
     # --- Data file handling --------------------------------------------------
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1575,16 +1594,20 @@ class ThermalVideoModel(QObject):
         for line in self.main_win.plot_line.keys():
             if line not in all_points:
                 rm_lines.append(line)
-                rm_lines.append(self.main_win.plot_line_lpf[line])
+                if hasattr(self.main_win, 'plot_line_lpf') and \
+                        line in self.main_win.plot_line_lpf:
+                    rm_lines.append(self.main_win.plot_line_lpf[line])
 
         if len(rm_lines):
             update_point_list = True
             for line in rm_lines:
-                if line in self.main_win.plot_lin:
+                if hasattr(self.main_win, 'plot_lin') and \
+                        line in self.main_win.plot_lin:
                     self.main_win.plot_line[line].remove()
                     del self.main_win.plot_line[line]
 
-                if line in self.main_win.plot_line_lpf:
+                if hasattr(self.main_win, 'plot_line_lpf') and \
+                        line in self.main_win.plot_line_lpf:
                     self.main_win.plot_line_lpf[line].remove()
                     del self.main_win.plot_line_lpf[line]
 
@@ -1628,7 +1651,15 @@ class ThermalVideoModel(QObject):
                 ls = '-'
 
             si = 1.0 / self.tracking_point[point].frequency
-            if point not in self.main_win.plot_line:
+            if point not in self.main_win.plot_line or \
+                    point not in self.main_win.plot_line_lpf:
+                
+                if point in self.main_win.plot_line:
+                    del self.main_win.plot_line[point]
+                
+                if point in self.main_win.plot_line_lpf:
+                    del self.main_win.plot_line_lpf[point]
+
                 # Create lines
                 self.main_win.plot_line[point] = \
                     self.main_win.plot_ax.plot(
@@ -1658,7 +1689,8 @@ class ThermalVideoModel(QObject):
                 if update_color:
                     self.main_win.plot_line[point].set_color(col)
                     self.main_win.plot_line[point].set_ls(ls)
-                    self.main_win.plot_line_lpf[point].set_color(col)
+                    if point in self.main_win.plot_line_lpf:
+                        self.main_win.plot_line_lpf[point].set_color(col)
                 else:
                     self.main_win.plot_line[point].set_ydata(
                         self.tracking_point[point].value_ts.copy())
@@ -1673,7 +1705,8 @@ class ThermalVideoModel(QObject):
                             len(self.tracking_point[point].value_ts)) * np.nan
                         lpf_ts[np.min(xi0):np.max(xi0)+1] = \
                             self.InterpLPF(y0, xi0, si, self.lpf)
-                        self.main_win.plot_line_lpf[point].set_ydata(lpf_ts)
+                        if point in self.main_win.plot_line_lpf: 
+                            self.main_win.plot_line_lpf[point].set_ydata(lpf_ts)
 
         self.main_win.plot_ax.relim()
         self.main_win.plot_ax.autoscale_view()
@@ -1749,37 +1782,40 @@ class ThermalVideoModel(QObject):
         self.plot_timecourse()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def export_roi_data(self):
+    def export_roi_data(self, fname=None, realod_data=None, **kwargs):
         if len(self.tracking_point) == 0:
             return
 
         Points = list(self.tracking_point.keys())
 
-        # Set file name
-        stdir = self.thermalData.filename.parent
-        initial_name = stdir / (self.thermalData.filename.stem +
-                                '_tracking_points.csv')
-        fname, _ = QFileDialog.getSaveFileName(
-                self.main_win, "Export data filename", str(initial_name),
-                "csv (*.csv);;all (*.*)", None,
-                QFileDialog.DontUseNativeDialog)
-        if fname == '':
-            return
+        if fname is None:
+            # Set file name
+            stdir = self.thermalData.filename.parent
+            initial_name = stdir / (self.thermalData.filename.stem +
+                                    '_tracking_points.csv')
+            fname, _ = QFileDialog.getSaveFileName(
+                    self.main_win, "Export data filename", str(initial_name),
+                    "csv (*.csv);;all (*.*)", None,
+                    QFileDialog.DontUseNativeDialog)
+            if fname == '':
+                return
 
         ext = Path(fname).suffix
         if ext != '.csv':
             fname += '.csv.'
 
-        # Ask if reload the data
-        ret = QMessageBox.question(self.main_win,
-                                   "Reload the tempertature values",
-                                   "Reload the tempertature values?",
-                                   QMessageBox.Yes | QMessageBox.No,
-                                   defaultButton=QMessageBox.No)
-        if ret == QMessageBox.Yes:
-            realod_data = True
-        else:
-            realod_data = False
+        if realod_data is None:
+            # Ask if reload the data
+            ret = QMessageBox.question(self.main_win,
+                                    "Reload the tempertature values",
+                                    "Reload the tempertature values?",
+                                    QMessageBox.Yes | QMessageBox.No,
+                                    defaultButton=QMessageBox.No)
+            if ret == QMessageBox.Yes:
+                realod_data = True
+            else:
+                realod_data = False
+
         if realod_data:
             for point in Points:
                 self.tracking_point[point].update_all_values()
@@ -1867,7 +1903,8 @@ class ThermalVideoModel(QObject):
             self.dlci.config_path = conf_file
 
         elif call == 'edit_config':
-            self.dlci.edit_config(self.main_win.ui_edit_config)
+            self.dlci.edit_config(self.main_win.ui_edit_config,
+                default_values={'bodyparts': ['LEYE','REYE']})
 
         elif call == 'extract_frames':
             # Wait message box
@@ -1967,7 +2004,7 @@ class ThermalVideoModel(QObject):
             self.dlci.merge_datasets()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def load_tracking(self):
+    def load_tracking(self, fileName=None, lh_thresh=None, **kwargs):
 
         if not self.videoData.loaded:
             self.main_win.error_MessageBox("No video data is set.")
@@ -1983,13 +2020,14 @@ class ThermalVideoModel(QObject):
             return
 
         # --- Load file -------------------------------------------------------
-        stdir = self.videoData.filename.parent
-        fileName, _ = QFileDialog.getOpenFileName(
-                self.main_win, "Open tracking file", str(stdir),
-                "csv files (*.csv)", None, QFileDialog.DontUseNativeDialog)
+        if fileName is None:
+            stdir = self.videoData.filename.parent
+            fileName, _ = QFileDialog.getOpenFileName(
+                    self.main_win, "Open tracking file", str(stdir),
+                    "csv files (*.csv)", None, QFileDialog.DontUseNativeDialog)
 
-        if fileName == '':
-            return
+            if fileName == '':
+                return
 
         track_df = pd.read_csv(fileName, header=[1, 2], index_col=0)
         with open(fileName, 'r') as fd:
@@ -2018,12 +2056,13 @@ class ThermalVideoModel(QObject):
                       if len(col) and 'Unnamed' not in col]
 
         if 'likelihood' in track_df[PointNames[0]].columns:
-            lh_thresh, ok = QInputDialog.getDouble(
-                self.main_win, 'Likelihood',
-                'Likelihood threshold:', value=0.75, min=0.0, max=1.0,
-                decimals=2)
-            if not ok:
-                return
+            if lh_thresh is None:
+                lh_thresh, ok = QInputDialog.getDouble(
+                    self.main_win, 'Likelihood',
+                    'Likelihood threshold:', value=0.95, min=0.0, max=1.0,
+                    decimals=2)
+                if not ok:
+                    return
 
         # --- Read data -------------------------------------------------------
         thermo_times = [self.thermalData.get_comtime_from_frame(frmIdx)
@@ -2067,7 +2106,7 @@ class ThermalVideoModel(QObject):
         # --- Set tracking_points ---------------------------------------------
         currentFrm = self.thermalData.frame_position
         for point in PointNames:
-            frm_mask = np.ones(len(res_track_df), dtype=np.bool)
+            frm_mask = np.ones(len(res_track_df), dtype=bool)
             if 'likelihood' in res_track_df[point].columns:
                 lh = res_track_df[point].likelihood.values
                 frm_mask &= (lh >= lh_thresh)
@@ -2142,6 +2181,9 @@ class ThermalVideoModel(QObject):
         # --- Filename setup ---
         if fname is None:
             stdir = APP_ROOT
+            if self.loaded_state_f is not None:
+                stdir = self.loaded_state_f
+
             fname, _ = QFileDialog.getSaveFileName(
                     self.main_win, "Save setting filename", str(stdir),
                     "pkl (*.pkl);;all (*.*)", None,
@@ -2152,6 +2194,8 @@ class ThermalVideoModel(QObject):
             fname = Path(fname)
             if fname.suffix != '.pkl':
                 fname = Path(str(fname) + '.pkl')
+            
+            self.loaded_state_f = fname
         else:
             if not fname.parent.is_dir():
                 self.main_win.error_MessageBox(f"Not found {fname.parent}.")
@@ -2253,6 +2297,10 @@ class ThermalVideoModel(QObject):
 
         with open(fname, 'rb') as fd:
             settings = pickle.load(fd)
+
+        if fname != self.tmp_state_f and \
+                fname != APP_ROOT / 'config' / 'last_working_state-0.pkl':
+            self.loaded_state_f = Path(fname)
 
         # Load thermalData
         if 'thermalData' in settings:
@@ -2370,6 +2418,11 @@ class ThermalVideoModel(QObject):
         for param, obj in settings.items():
             if hasattr(self, param):
                 setattr(self, param, obj)
+        
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def save_tmp_status(self):
+        self.save_status(fname=self.tmp_state_f)
+        self.save_timer.start(self.save_tmp_wait * 1000)
 
 
 # %% View class : MainWindow ==================================================
@@ -2378,7 +2431,7 @@ class MainWindow(QMainWindow):
     """
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, batchmode=False):
         super(MainWindow, self).__init__(parent)
         self.setWindowTitle("Thermal Video Tracking")
 
@@ -2388,7 +2441,7 @@ class MainWindow(QMainWindow):
         self.init_ui_objects()
 
         # Init the model class
-        self.model = ThermalVideoModel(main_win=self)
+        self.model = ThermalVideoModel(main_win=self, batchmode=batchmode)
 
         # Connect signals
         self.connect_signal_handlers()
@@ -3216,6 +3269,9 @@ class MainWindow(QMainWindow):
             else:
                 data_dir = self.model.videoData.filename.parent
             shutil.copy(fname, data_dir / fname.name)
+        
+        if self.model.tmp_state_f.is_file():
+            self.model.tmp_state_f.unlink()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def mouseDoubleClickEvent(self, e):
