@@ -63,8 +63,8 @@ from dlc_interface import DLCinter
 
 
 # %% Default values
-tracking_point_radius_default = 8
-tracking_point_pen_color_default = 'blue'
+tracking_point_radius_default = 2
+tracking_point_pen_color_default = 'black'
 plot_kind = ['position', 'angle']
 
 qt_global_colors = ['black', 'white', 'darkGray', 'gray', 'lightGray', 'red',
@@ -269,11 +269,12 @@ class DLC_GUI(QObject):
     edit_point_signal = pyqtSignal(str)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def __init__(self, main_win=None):
+    def __init__(self, main_win, batchmode=False):
         super(DLC_GUI, self).__init__(parent=main_win)
 
         # View model
         self.main_win = main_win
+        self.tracking_point_pen_color_default = tracking_point_pen_color_default
 
         # --- Video data ------------------------------------------------------
         video_UI_objs = {'frFwdBtn': self.main_win.videoFrameFwdBtn,
@@ -317,18 +318,34 @@ class DLC_GUI(QObject):
         self.edit_point_signal.connect(self.edit_tracking_point)
 
         # --- Load last working status ----------------------------------------
+        self.loaded_state_f = None
+        self.tmp_state_f = APP_ROOT / 'config' / 'DLCGUI_tmp_working_state.pkl'
         self.num_saved_setting_hist = 5
-        last_state_f = APP_ROOT / 'config' / 'DLC_GUI_last_working_state-0.pkl'
+        last_state_f = APP_ROOT / 'config' / 'DLCGUI_last_working_state-0.pkl'
         if not last_state_f.parent.is_dir():
             last_state_f.parent.mkdir()
+        
+        if not batchmode:
+            self.save_timer = QTimer()
+            self.save_timer.setSingleShot(True)
+            self.save_timer.timeout.connect(self.save_tmp_status)
+            self.save_tmp_wait = 60  # seconds
+            self.save_timer.start(self.save_tmp_wait * 1000)
 
-        if last_state_f.is_file():
-            ret = QMessageBox.question(self.main_win, "Load last state",
-                                       "Retrieve the last working state?",
-                                       QMessageBox.Yes | QMessageBox.No,
-                                       )
-            if ret == QMessageBox.Yes:
-                self.load_status(fname=last_state_f)
+            if self.tmp_state_f.is_file():
+                ret = QMessageBox.question(self.main_win, "Recover state",
+                                        "Recover the last aborted state?",
+                                        QMessageBox.Yes | QMessageBox.No,
+                                        )
+                if ret == QMessageBox.Yes:
+                    self.load_status(fname=self.tmp_state_f)
+            elif last_state_f.is_file():
+                ret = QMessageBox.question(self.main_win, "Load last state",
+                                        "Retrieve the last working state?",
+                                        QMessageBox.Yes | QMessageBox.No,
+                                        )
+                if ret == QMessageBox.Yes:
+                    self.load_status(fname=last_state_f)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def openVideoFile(self, *args, fileName=None, **kwargs):
@@ -493,7 +510,11 @@ class DLC_GUI(QObject):
             self.main_win.roi_y_spbx.setValue(-1)
             self.main_win.roi_rad_spbx.setValue(tracking_point_radius_default)
             self.main_win.roi_color_cmbbx.setCurrentText(
-                tracking_point_pen_color_default)
+                self.tracking_point_pen_color_default)
+            pcols =  list(pen_color_rgb.keys())
+            cidx = pcols.index(self.tracking_point_pen_color_default)
+            cidx = (cidx+1) % len(pcols)
+            self.tracking_point_pen_color_default = pcols[cidx]
 
         # unblock signals
         self.main_win.roi_idx_cmbbx.blockSignals(False)
@@ -557,7 +578,11 @@ class DLC_GUI(QObject):
                 self.tracking_mark[point_name]['rad'] = \
                     self.tracking_point[point_name].radius
                 self.tracking_mark[point_name]['pen_color'] = \
-                    tracking_point_pen_color_default
+                    self.tracking_point_pen_color_default
+                pcols =  list(pen_color_rgb.keys())
+                cidx = pcols.index(self.tracking_point_pen_color_default)
+                cidx = (cidx+1) % len(pcols)
+                self.tracking_point_pen_color_default = pcols[cidx]
 
                 # Set the point positions
                 frame_indices = np.arange(self.videoData.frame_position,
@@ -1029,20 +1054,21 @@ class DLC_GUI(QObject):
         self.main_win.roi_plot_canvas.draw()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def export_roi_data(self):
+    def export_roi_data(self, fname=None, **kwargs):
         if len(self.tracking_point) == 0 and len(self.time_marker) == 0:
             return
 
-        # Set file name
-        stdir = self.videoData.filename.parent
-        initial_name = stdir / (self.videoData.filename.stem +
-                                '_tracking_points.csv')
-        fname, _ = QFileDialog.getSaveFileName(
-                self.main_win, "Export data filename", str(initial_name),
-                "csv (*.csv);;all (*.*)", None,
-                QFileDialog.DontUseNativeDialog)
-        if fname == '':
-            return
+        if fname is None
+            # Set file name
+            stdir = self.videoData.filename.parent
+            initial_name = stdir / (self.videoData.filename.stem +
+                                    '_tracking_points.csv')
+            fname, _ = QFileDialog.getSaveFileName(
+                    self.main_win, "Export data filename", str(initial_name),
+                    "csv (*.csv);;all (*.*)", None,
+                    QFileDialog.DontUseNativeDialog)
+            if fname == '':
+                return
 
         ext = Path(fname).suffix
         if ext != '.csv':
@@ -1119,7 +1145,7 @@ class DLC_GUI(QObject):
             self.dlci.config_path = conf_file
 
         elif call == 'edit_config':
-            default_values = {'bodyparts': ['body'],
+            default_values = {'bodyparts': ['LEYE', 'MID', 'REYE', 'NOSE'],
                               'dotsize': 6}
             self.dlci.edit_config(self.main_win.ui_edit_config,
                                   default_values=default_values)
@@ -1138,7 +1164,7 @@ class DLC_GUI(QObject):
         elif call == 'label_frames':
             # Save the current status because DLC's GUI window may kill the
             # process at exit.
-            fname = APP_ROOT / 'config' / 'last_working_state-0.pkl'
+            fname = APP_ROOT / 'config' / 'DLCGUI_last_working_state-0.pkl'
             if not fname.parent.is_dir():
                 fname.parent.mkdir()
             self.save_status(fname=fname)
@@ -1211,7 +1237,7 @@ class DLC_GUI(QObject):
 
         elif call == 'refine_labels':
             # Save working setting
-            fname = APP_ROOT / 'config' / 'last_working_state-0.pkl'
+            fname = APP_ROOT / 'config' / 'DLCGUI_last_working_state-0.pkl'
             if not fname.parent.is_dir():
                 fname.parent.mkdir()
             self.save_status(fname=fname)
@@ -1222,19 +1248,20 @@ class DLC_GUI(QObject):
             self.dlci.merge_datasets()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def load_tracking(self):
+    def load_tracking(self, fileName=None, lh_thresh=None, **kwargs):
         if not self.videoData.loaded:
             self.main_win.error_MessageBox("No video data is set.")
             return
 
         # --- Load file -------------------------------------------------------
-        stdir = self.videoData.filename.parent
-        fileName, _ = QFileDialog.getOpenFileName(
-                self.main_win, "Open tracking file", str(stdir),
-                "csv files (*.csv)", None, QFileDialog.DontUseNativeDialog)
+        if fileName is None:
+            stdir = self.videoData.filename.parent
+            fileName, _ = QFileDialog.getOpenFileName(
+                    self.main_win, "Open tracking file", str(stdir),
+                    "csv files (*.csv)", None, QFileDialog.DontUseNativeDialog)
 
-        if fileName == '':
-            return
+            if fileName == '':
+                return
 
         track_df = pd.read_csv(fileName, header=[1, 2], index_col=0)
         with open(fileName, 'r') as fd:
@@ -1260,12 +1287,13 @@ class DLC_GUI(QObject):
                       if len(col) and 'Unnamed' not in col]
 
         if len(PointNames) and 'likelihood' in track_df[PointNames[0]].columns:
-            lh_thresh, ok = QInputDialog.getDouble(
-                self.main_win, 'Likelihood',
-                'Likelihood threshold:', value=0.75, min=0.0, max=1.0,
-                decimals=2)
-            if not ok:
-                return
+            if lh_thresh is None:
+                lh_thresh, ok = QInputDialog.getDouble(
+                    self.main_win, 'Likelihood',
+                    'Likelihood threshold:', value=0.9, min=0.0, max=1.0,
+                    decimals=2)
+                if not ok:
+                    return
 
         # --- Read data and set tracking_points -------------------------------
         currentFrm = self.videoData.frame_position
@@ -1335,6 +1363,9 @@ class DLC_GUI(QObject):
         # --- Filename setup ---
         if fname is None:
             stdir = APP_ROOT
+            if self.loaded_state_f is not None:
+                stdir = self.loaded_state_f
+
             fname, _ = QFileDialog.getSaveFileName(
                     self.main_win, "Save setting filename", str(stdir),
                     "pkl (*.pkl);;all (*.*)", None,
@@ -1345,6 +1376,8 @@ class DLC_GUI(QObject):
             fname = Path(fname)
             if fname.suffix != '.pkl':
                 fname = Path(str(fname) + '.pkl')
+            
+            self.loaded_state_f = fname
         else:
             if not fname.parent.is_dir():
                 self.main_win.error_MessageBox(f"Not found {fname.parent}.")
@@ -1438,6 +1471,10 @@ class DLC_GUI(QObject):
         with open(fname, 'rb') as fd:
             settings = pickle.load(fd)
 
+        if fname != self.tmp_state_f and \
+                fname != APP_ROOT / 'config' / 'DLCGUI_last_working_state-0.pkl':
+            self.loaded_state_f = Path(fname)
+
         # Load videoData
         if 'videoData' in settings:
             fname = APP_ROOT / settings['videoData']['filename']
@@ -1509,6 +1546,11 @@ class DLC_GUI(QObject):
             if hasattr(self, param):
                 setattr(self, param, obj)
 
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def save_tmp_status(self):
+        self.save_status(fname=self.tmp_state_f)
+        self.save_timer.start(self.save_tmp_wait * 1000)
+
 
 # %% View class : ViewWindow ==================================================
 class ViewWindow(QMainWindow):
@@ -1516,7 +1558,7 @@ class ViewWindow(QMainWindow):
     """
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, batchmode=False):
         super(ViewWindow, self).__init__(parent)
         self.setWindowTitle("DLC Video GUI")
 
@@ -1524,7 +1566,7 @@ class ViewWindow(QMainWindow):
         self.init_ui_objects()
 
         # Connect slot
-        self.model = DLC_GUI(main_win=self)
+        self.model = DLC_GUI(main_win=self, batchmode=batchmode)
 
         # Connect signals
         self.connect_signal_handlers()
@@ -2132,7 +2174,7 @@ class ViewWindow(QMainWindow):
     def closeEvent(self, event):
         if self.model.videoData.loaded:
             # Save working setting
-            fname = APP_ROOT / 'config' / 'DLC_GUI_last_working_state-0.pkl'
+            fname = APP_ROOT / 'config' / 'DLCGUI_last_working_state-0.pkl'
             if not fname.parent.is_dir():
                 fname.parent.mkdir()
 
@@ -2142,6 +2184,9 @@ class ViewWindow(QMainWindow):
             # Copy the state file to data root
             data_dir = self.model.videoData.filename.parent
             shutil.copy(fname, data_dir / fname.name)
+
+        if self.model.tmp_state_f.is_file():
+            self.model.tmp_state_f.unlink()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def mouseDoubleClickEvent(self, e):
@@ -2157,10 +2202,5 @@ if __name__ == '__main__':
     win.resize(890, 830)
     win.move(0, 0)
     win.show()
-    try:
-        ret = app.exec_()
-    except Exception as e:
-        print(e)
-        print(ret)
-
-    # sys.exit(ret)
+    ret = app.exec_()
+    sys.exit(ret)

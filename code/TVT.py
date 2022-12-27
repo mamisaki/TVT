@@ -1786,8 +1786,6 @@ class ThermalVideoModel(QObject):
         if len(self.tracking_point) == 0:
             return
 
-        Points = list(self.tracking_point.keys())
-
         if fname is None:
             # Set file name
             stdir = self.thermalData.filename.parent
@@ -1816,6 +1814,7 @@ class ThermalVideoModel(QObject):
             else:
                 realod_data = False
 
+        Points = list(self.tracking_point.keys())
         if realod_data:
             for point in Points:
                 self.tracking_point[point].update_all_values()
@@ -2005,7 +2004,6 @@ class ThermalVideoModel(QObject):
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def load_tracking(self, fileName=None, lh_thresh=None, **kwargs):
-
         if not self.videoData.loaded:
             self.main_win.error_MessageBox("No video data is set.")
             return
