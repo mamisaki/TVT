@@ -962,7 +962,7 @@ class DLC_GUI(QObject):
                     tstr = re.sub(r'\..+$', '', tstr)
                     xtick_labs.append(tstr)
 
-            self.main_win.plot_ax.set_xticklabels(xtick_labs)
+            self.main_win.plot_ax.set_xticks(xticks, xtick_labs)
 
         # --- Time line -------------------------------------------------------
         xpos = self.main_win.plot_xvals[self.videoData.frame_position]
@@ -1058,7 +1058,7 @@ class DLC_GUI(QObject):
         if len(self.tracking_point) == 0 and len(self.time_marker) == 0:
             return
 
-        if fname is None
+        if fname is None:
             # Set file name
             stdir = self.videoData.filename.parent
             initial_name = stdir / (self.videoData.filename.stem +
