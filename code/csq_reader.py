@@ -134,7 +134,8 @@ class CSQ_READER():
         # -- Set temperature data --------------------------------------------
         if self.thermaldata_npy_f.is_file() and self.extract_temp_file:
             try:
-                self.thermal_data_frames = np.load(self.thermaldata_npy_f).astype(np.float32)
+                self.thermal_data_frames = np.load(self.thermaldata_npy_f,
+                    mmap_mode='r+')
             except Exception:
                 self.thermal_data_frames = np.ones(
                     [self.Count, self.Height, self.Width], dtype=np.float32) * np.nan

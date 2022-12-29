@@ -2270,7 +2270,8 @@ class ThermalVideoModel(QObject):
                     param[k] = path_to_rel(v)
             else:
                 if isinstance(param, Path):
-                    param = PurePath(os.path.relpath(param, self.DATA_ROOT))
+                    if param.is_relative_to(self.DATA_ROOT):
+                        param = PurePath(param.relative_to(self.DATA_ROOT))
 
             return param
 
@@ -2321,12 +2322,14 @@ class ThermalVideoModel(QObject):
             fname = self.DATA_ROOT / settings['thermalData']['filename']
             if not fname.is_file():
                 self.openThermalFile()
+                fname = self.thermalData.filename
+                if isinstance(fname, Path):
+                    self.DATA_ROOT = self.thermalData.filename.parent
             else:
                 self.openThermalFile(fileName=fname)
             
             fname = self.thermalData.filename
-            if fname.is_file():
-                self.DATA_ROOT = self.thermalData.filename.parent
+            if isinstance(fname, Path) and fname.is_file():
                 frame_position = settings['thermalData']['frame_position']
                 self.thermalData.show_frame(frame_idx=frame_position)
 
@@ -2820,7 +2823,8 @@ class MainWindow(QMainWindow):
             partial(self.model.plot_timecourse,
                     update_plot=True))
 
-        self.roi_load_btn.clicked.connect(self.model.load_tracking)
+        self.roi_load_btn.clicked.connect(
+            partial(self.model.load_tracking, fileName=None))
         self.roi_export_btn.clicked.connect(self.model.export_roi_data)
 
         # Time-course plot
@@ -3157,7 +3161,8 @@ class MainWindow(QMainWindow):
         # -- XI --
         action = QAction('Load tracking positions', self)
         action.setStatusTip('Load positions tracked by DeepLabCut')
-        action.triggered.connect(self.model.load_tracking)
+        action.triggered.connect(
+            partial(self.model.load_tracking, fileName=None))
         dlcMenu.addAction(action)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
