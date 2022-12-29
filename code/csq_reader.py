@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import cv2
 import ffmpeg
+from tqdm import tqdm
 
 
 ## %% CSQ_READER ==============================================================
@@ -30,7 +31,7 @@ class CSQ_READER():
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def __init__(self, fname, temp_dir=(Path.home() / '.TVT'),
-                 progressDlg=None):
+                 progressDlg=None, extract_temp_file=False):
 
         # --- Set parameters --------------------------------------------------
         # Prepare the temp dir
@@ -48,11 +49,17 @@ class CSQ_READER():
 
         fname = Path(fname)
 
-        metadata_pkl_f = fname.parent / (fname.stem + '_meta.pkl')
-        rawdata_pkl_f = fname.parent / (fname.stem + '_raw.pkl')
+        self.metadata_list = None
+        self.rawdata_list = None
+        self.thermal_data_frames = None
+
+        self.metadata_pkl_f = fname.parent / (fname.stem + '_meta.pkl')
+        self.rawdata_pkl_f = fname.parent / (fname.stem + '_raw.pkl')
+        self.extract_temp_file = extract_temp_file
+        self.thermaldata_npy_f = fname.parent / (fname.stem + '_temp.npy')
 
         # -- Read and split binary data ---------------------------------------
-        if not metadata_pkl_f.is_file() or not rawdata_pkl_f.is_file():
+        if not self.metadata_pkl_f.is_file() or not self.rawdata_pkl_f.is_file():
             #  Load binary data
             self._logmsg(f"Loading binary data from {fname.name} ...")
             st = time.time()
@@ -80,7 +87,7 @@ class CSQ_READER():
         self._logmsg("Reading meta data ...")
         st = time.time()
 
-        if not metadata_pkl_f.is_file():
+        if not self.metadata_pkl_f.is_file():
             fields = ['Emissivity', 'ObjectDistance',
                       'ReflectedApparentTemperature', 'AtmosphericTemperature',
                       'IRWindowTemperature', "IRWindowTransmission",
@@ -89,11 +96,11 @@ class CSQ_READER():
                       'RawThermalImageHeight', 'DateTimeOriginal']
             self.metadata_list = self._read_metadata(
                 split_data, fields, progress_base_total=[33, 33])
-            with open(metadata_pkl_f, 'wb') as fd:
+            with open(self.metadata_pkl_f, 'wb') as fd:
                 pickle.dump(self.metadata_list, fd)
 
         else:
-            with open(metadata_pkl_f, 'rb') as fd:
+            with open(self.metadata_pkl_f, 'rb') as fd:
                 self.metadata_list = pickle.load(fd)
 
         self._logmsg("Reading meta data ... done.", st=st, progress=66)
@@ -111,18 +118,29 @@ class CSQ_READER():
         self._logmsg("Extracting raw data ...")
         st = time.time()
 
-        if not rawdata_pkl_f.is_file():
+        if not self.rawdata_pkl_f.is_file():
             self.rawdata_list = self._extract_rawdata(split_data)
-            with open(rawdata_pkl_f, 'wb') as fd:
+            with open(self.rawdata_pkl_f, 'wb') as fd:
                 pickle.dump(self.rawdata_list, fd)
         else:
-            with open(rawdata_pkl_f, 'rb') as fd:
+            with open(self.rawdata_pkl_f, 'rb') as fd:
                 self.rawdata_list = pickle.load(fd)
 
         self._logmsg("Extracting raw data ... done.", st=st, progress=99)
 
         self._logmsg("Done", progress=100)
         self.progressDl = None
+
+        # -- Set temperature data --------------------------------------------
+        if self.thermaldata_npy_f.is_file() and self.extract_temp_file:
+            try:
+                self.thermal_data_frames = np.load(self.thermaldata_npy_f).astype(np.float32)
+            except Exception:
+                self.thermal_data_frames = np.ones(
+                    [self.Count, self.Height, self.Width], dtype=np.float32) * np.nan
+        else:
+            self.thermal_data_frames = np.ones(
+                [self.Count, self.Height, self.Width], dtype=np.float32) * np.nan
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def _logmsg(self, msg, st=None, progress=None):
@@ -426,7 +444,8 @@ class CSQ_READER():
         return temp_celcius
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def _get_thermal_data(self, frame_indices, progressDlg=None, verb=False):
+    def _get_thermal_data(self, frame_indices, progressDlg=None, update=False,
+                          verb=False):
 
         # --- Check frame index -----------------------------------------------
         frame_indices = np.array(frame_indices)
@@ -445,41 +464,61 @@ class CSQ_READER():
         h, w = (self.Height, self.Width)
         thermal_data_array = np.empty([len(frame_indices), h, w])
 
+        if progressDlg is None and len(frame_indices) > 100:
+            pbar = tqdm(total=len(frame_indices),
+                desc='Reading thermal data')
+        else:
+            pbar = None
+
         for ii, fidx in enumerate(frame_indices):
+            fridx = int(np.round(fidx)) 
             if progressDlg is not None:
                 if progressDlg.wasCanceled():
                     return None
                 progressDlg.setValue(ii)
                 progressDlg.repaint()
 
-            input_data = self.rawdata_list[int(np.round(fidx))]
-            process = (
-                ffmpeg
-                .input('pipe:')
-                .output('pipe:', format='rawvideo', pix_fmt='gray16le')
-                .run_async(pipe_stdin=True, pipe_stdout=True, quiet=True)
-                )
+            thermal_data = self.thermal_data_frames[fridx, :, :]
+            if not update and not np.any(np.isnan(thermal_data)):
+                thermal_data_array[ii, :, :] = thermal_data
+            else:
+                input_data = self.rawdata_list[fridx]
+                process = (
+                    ffmpeg
+                    .input('pipe:')
+                    .output('pipe:', format='rawvideo', pix_fmt='gray16le')
+                    .run_async(pipe_stdin=True, pipe_stdout=True, quiet=True)
+                    )
 
-            buffer, _ = process.communicate(input=input_data)
-            raw = np.frombuffer(buffer, np.uint16).reshape([h, w])
-            meta_data = self.metadata_list[int(np.round(fidx))]
+                buffer, _ = process.communicate(input=input_data)
+                raw = np.frombuffer(buffer, np.uint16).reshape([h, w])
+                meta_data = self.metadata_list[fridx]
 
-            thermal_data = self._raw2temp(
-                raw,
-                E=meta_data['Emissivity'],
-                OD=meta_data['ObjectDistance'],
-                RTemp=meta_data['ReflectedApparentTemperature'],
-                ATemp=meta_data['AtmosphericTemperature'],
-                IRWTemp=meta_data['IRWindowTemperature'],
-                IRT=meta_data["IRWindowTransmission"],
-                RH=meta_data['RelativeHumidity'],
-                PR1=meta_data['PlanckR1'],
-                PB=meta_data['PlanckB'],
-                PF=meta_data['PlanckF'],
-                PO=meta_data['PlanckO'],
-                PR2=meta_data['PlanckR2']
-                )
-            thermal_data_array[ii, :, :] = thermal_data
+                thermal_data = self._raw2temp(
+                    raw,
+                    E=meta_data['Emissivity'],
+                    OD=meta_data['ObjectDistance'],
+                    RTemp=meta_data['ReflectedApparentTemperature'],
+                    ATemp=meta_data['AtmosphericTemperature'],
+                    IRWTemp=meta_data['IRWindowTemperature'],
+                    IRT=meta_data["IRWindowTransmission"],
+                    RH=meta_data['RelativeHumidity'],
+                    PR1=meta_data['PlanckR1'],
+                    PB=meta_data['PlanckB'],
+                    PF=meta_data['PlanckF'],
+                    PO=meta_data['PlanckO'],
+                    PR2=meta_data['PlanckR2']
+                    )
+                thermal_data_array[ii, :, :] = thermal_data
+
+                # Save read thermal_data into self.thermal_data_frames
+                self.thermal_data_frames[fridx, :, :] = thermal_data
+
+            if pbar is not None:
+                pbar.update()
+
+        if pbar is not None:
+            pbar.close()
 
         return thermal_data_array
 
@@ -533,10 +572,21 @@ class CSQ_READER():
 
         frame_idx = np.round(t_sec * self.FrameRate)
         return self.getFramebyIdx(frame_idx)
-
+    
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def saveTempFrames(self, frame_indices=None, update=False):
+        if update:
+            if frame_indices is None:
+                frame_indices = np.arange(0, self.Count, dtype=int)
+            _ = self._get_thermal_data(frame_indices, update=update)
+        
+        np.save(self.thermaldata_npy_f, self.thermal_data_frames)
 
 ## %% main =====================================================================
 if __name__ == '__main__':
-    fname = '../Data/20190630/FLIR6454.csq'
-
+    fname = '../data/dog_EmotionalContingency/FLIR6551.csq'
     csq_read = CSQ_READER(fname)
+    csq_read.saveTempFrames()
+
+
+

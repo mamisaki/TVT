@@ -44,7 +44,7 @@ class DLCinter():
     """
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def __init__(self, APP_ROOT, config_path=None, ui_parent=None):
+    def __init__(self, DATA_ROOT, config_path=None, ui_parent=None):
         """Initialize the DLCinter class
 
         Parametes
@@ -53,7 +53,7 @@ class DLCinter():
             Path to a config file (.yaml).
         """
 
-        self.APP_ROOT = APP_ROOT
+        self.DATA_ROOT = DATA_ROOT
         self._config_path = None  # config file portable across hosts
         self._config_work_path = None  # config file used in the current host
         if config_path is not None:
@@ -104,12 +104,12 @@ class DLCinter():
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def set_config(self, config_path0):
         """Set config file (_config_path, _config_work_path) with converting
-        paths. Convert paths in config to a relative one from APP_ROOT or vice
+        paths. Convert paths in config to a relative one from DATA_ROOT or vice
         versa.
 
-        If the config includes ${APP_ROOT}, a config file with full-path
+        If the config includes ${DATA_ROOT}, a config file with full-path
         is created and set to self.config_work_path.
-        Otherwise, paths in the config are converted to relative to APP_ROOT,
+        Otherwise, paths in the config are converted to relative to DATA_ROOT,
         and a converted config is saved in a file to set in self.config_path.
         """
 
@@ -118,17 +118,17 @@ class DLCinter():
             config_data = yaml.safe_load(stream)
 
         # Convert paths
-        if '${APP_ROOT}' in config_data['project_path']:
+        if '${DATA_ROOT}' in config_data['project_path']:
             # File with relative path is read.
             # convert to absolute path
             project_path = config_data['project_path']
-            project_path = project_path.replace('${APP_ROOT}/', '')
-            project_path = str((self.APP_ROOT / project_path).resolve())
+            project_path = project_path.replace('${DATA_ROOT}/', '')
+            project_path = str((self.DATA_ROOT / project_path).resolve())
 
             video_sets = {}
             for vf0 in config_data['video_sets'].keys():
-                vf = vf0.replace('${APP_ROOT}/', '')
-                vf = str((self.APP_ROOT / vf).resolve())
+                vf = vf0.replace('${DATA_ROOT}/', '')
+                vf = str((self.DATA_ROOT / vf).resolve())
                 video_sets[vf] = config_data['video_sets'][vf0]
 
             config_data['project_path'] = project_path
@@ -150,15 +150,15 @@ class DLCinter():
             # convert to relative path
             project_path = os.path.relpath(
                     Path(config_data['project_path']).absolute(),
-                    self.APP_ROOT)
+                    self.DATA_ROOT)
             project_path = str(project_path).replace(os.sep, '/')
-            project_path = '${APP_ROOT}/' + project_path
+            project_path = '${DATA_ROOT}/' + project_path
 
             video_sets = {}
             for vf0 in config_data['video_sets'].keys():
-                vf = os.path.relpath(Path(vf0).absolute(), self.APP_ROOT)
+                vf = os.path.relpath(Path(vf0).absolute(), self.DATA_ROOT)
                 vf = str(vf).replace(os.sep, '/')
-                vf = '${APP_ROOT}/' + vf
+                vf = '${DATA_ROOT}/' + vf
                 video_sets[vf] = config_data['video_sets'][vf0]
 
             config_data['project_path'] = project_path

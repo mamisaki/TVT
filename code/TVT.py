@@ -93,7 +93,7 @@ themro_cmap = cv2.COLORMAP_JET
 
 if '__file__' not in locals():
     __file__ = './this.py'
-APP_ROOT = Path(__file__).absolute().parent.parent
+APP_ROOT = Path(__file__).parent.parent
 
 OS = platform.system()
 
@@ -304,8 +304,10 @@ class ThermalDataMovie(DataMovie):
     """
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def __init__(self, parent, dispImg, UI_objs):
+    def __init__(self, parent, dispImg, UI_objs, extract_temp_file=False):
         super(ThermalDataMovie, self).__init__(parent, dispImg, UI_objs)
+        self.extract_temp_file = extract_temp_file
+        self.thermal_data_reader = None
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def open(self, filename):
@@ -327,11 +329,14 @@ class ThermalDataMovie(DataMovie):
             progressDlg.show()
 
             try:
-                cr = CSQ_READER(filename, progressDlg=progressDlg)
+                cr = CSQ_READER(filename, progressDlg=progressDlg,
+                    extract_temp_file=self.extract_temp_file)
             except Exception as e:
                 print(e)
                 return
 
+            if self.thermal_data_reader is not None:
+                del self.thermal_data_reader
             self.thermal_data_reader = cr
 
             # Close progress dialog
@@ -572,6 +577,10 @@ class ThermalDataMovie(DataMovie):
         return values
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def save_temperature_frames(self, update=False):
+        self.thermal_data_reader.saveTempFrames(update=update)
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def unload(self):
         super(ThermalDataMovie, self).unload()
 
@@ -622,8 +631,10 @@ class ThermalVideoModel(QObject):
     edit_point_signal = pyqtSignal(str)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def __init__(self, main_win, batchmode=False):
+    def __init__(self, main_win, batchmode=False, extract_temp_file=False):
         super(ThermalVideoModel, self).__init__(parent=main_win)
+
+        self.DATA_ROOT = APP_ROOT / 'data'
 
         # main_win object
         self.main_win = main_win
@@ -638,7 +649,8 @@ class ThermalVideoModel(QObject):
                             'positionLabel': self.main_win.thermalPositionLab,
                             'syncBtn': self.main_win.syncVideoBtn}
             self.thermalData = ThermalDataMovie(self, self.main_win.thermalDispImg,
-                                                thermal_UI_objs)
+                                                thermal_UI_objs,
+                                                extract_temp_file=extract_temp_file)
 
             video_UI_objs = {'frFwdBtn': self.main_win.videoFrameFwdBtn,
                             'frBkwBtn': self.main_win.videoFrameBkwBtn,
@@ -685,7 +697,7 @@ class ThermalVideoModel(QObject):
         self.editRange = 'current'
 
         # --- DeepLabCut interface --------------------------------------------
-        self.dlci = DLCinter(APP_ROOT, ui_parent=self.main_win)
+        self.dlci = DLCinter(self.DATA_ROOT, ui_parent=self.main_win)
 
         # --- Connect signals -------------------------------------------------
         self.move_point_signal.connect(self.update_dispImg)
@@ -726,7 +738,7 @@ class ThermalVideoModel(QObject):
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def openThermalFile(self, *args, fileName=None, **kwargs):
         if fileName is None:
-            stdir = APP_ROOT / 'data'
+            stdir = self.DATA_ROOT
             filterStr = "Thermal data (*.csq);;All files (*.*)"
             fileName, _ = QFileDialog.getOpenFileName(
                 self.main_win, "Open thermal file", str(stdir), filterStr,
@@ -752,14 +764,16 @@ class ThermalVideoModel(QObject):
         cmax = self.main_win.thermal_clim_max_spbx.value()
         cmin = self.main_win.thermal_clim_min_spbx.value()
 
-        if cmax != self.main_win.thermalDispImg.cmax:
+        if hasattr(self.main_win.thermalDispImg, 'cmax') and \
+                cmax != self.main_win.thermalDispImg.cmax:
             if cmax <= cmin:
                 cmax = cmin + 0.1
                 self.main_win.thermal_clim_max_spbx.blockSignals(True)
                 self.main_win.thermal_clim_max_spbx.setValue(cmax)
                 self.main_win.thermal_clim_max_spbx.blockSignals(False)
 
-        if cmin != self.main_win.thermalDispImg.cmin:
+        if hasattr(self.main_win.thermalDispImg, 'cmin') and \
+                cmin != self.main_win.thermalDispImg.cmin:
             if cmin >= cmax:
                 cmin = cmax - 0.1
                 self.main_win.thermal_clim_min_spbx.blockSignals(True)
@@ -817,7 +831,7 @@ class ThermalVideoModel(QObject):
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def openVideoFile(self, *args, fileName=None, **kwargs):
         if fileName is None:
-            stdir = APP_ROOT / 'data'
+            stdir = self.DATA_ROOT
             fileName, _ = QFileDialog.getOpenFileName(
                 self.main_win, "Open Movie", str(stdir),
                 "movie files (*.mp4 *.avi);; all (*.*)", None,
@@ -2249,14 +2263,14 @@ class ThermalVideoModel(QObject):
             settings['thermal_clim_max'] = \
                 self.main_win.thermal_clim_max_spbx.value()
 
-        # --- Convert Path to relative to APP_ROOT ---
+        # --- Convert Path to relative to DATA_ROOT ---
         def path_to_rel(param):
             if type(param) is dict:
                 for k, v in param.items():
                     param[k] = path_to_rel(v)
             else:
                 if isinstance(param, Path):
-                    param = PurePath(os.path.relpath(param, APP_ROOT))
+                    param = PurePath(os.path.relpath(param, self.DATA_ROOT))
 
             return param
 
@@ -2300,12 +2314,20 @@ class ThermalVideoModel(QObject):
                 fname != APP_ROOT / 'config' / 'last_working_state-0.pkl':
             self.loaded_state_f = Path(fname)
 
+        path_rep = None
+
         # Load thermalData
         if 'thermalData' in settings:
-            fname = APP_ROOT / settings['thermalData']['filename']
-            frame_position = settings['thermalData']['frame_position']
-            if Path(fname).is_file():
+            fname = self.DATA_ROOT / settings['thermalData']['filename']
+            if not fname.is_file():
+                self.openThermalFile()
+            else:
                 self.openThermalFile(fileName=fname)
+            
+            fname = self.thermalData.filename
+            if fname.is_file():
+                self.DATA_ROOT = self.thermalData.filename.parent
+                frame_position = settings['thermalData']['frame_position']
                 self.thermalData.show_frame(frame_idx=frame_position)
 
             del settings['thermalData']
@@ -2335,22 +2357,30 @@ class ThermalVideoModel(QObject):
 
         # Load videoData
         if 'videoData' in settings:
-            fname = APP_ROOT / settings['videoData']['filename']
-            frame_position = settings['videoData']['frame_position']
-            if fname.is_file():
+            fname = self.DATA_ROOT / settings['videoData']['filename']
+            if not fname.is_file():
+                self.openVideoFile()
+            else:
                 self.openVideoFile(fileName=fname)
+
+            fname = self.thermalData.filename
+            if fname.is_file():
+                frame_position = settings['videoData']['frame_position']
                 self.videoData.show_frame(frame_idx=frame_position)
 
             del settings['videoData']
 
         if 'on_sync' in settings:
             self.sync_video_thermal(settings['on_sync'])
-
             del settings['on_sync']
 
         # Load DLC config
         if 'dlci' in settings:
-            self.dlci.config_path = APP_ROOT / settings['dlci']['_config_path']
+            dlci_conf_path = self.DATA_ROOT / settings['dlci']['_config_path']
+            if not dlci_conf_path.is_file():
+                self.dlc_call('load_config')
+            else:
+                self.dlci.config_path = dlci_conf_path
             del settings['dlci']
 
         # Load time_marker
@@ -2369,7 +2399,7 @@ class ThermalVideoModel(QObject):
         # Load tracking_point
         if 'tracking_point' in settings:
             for lab, dobj in settings['tracking_point'].items():
-                dmovie_fname = str(APP_ROOT / dobj['dataMovie.filename'])
+                dmovie_fname = str(self.DATA_ROOT / dobj['dataMovie.filename'])
                 if dmovie_fname == str(self.thermalData.filename) \
                         and self.thermalData.loaded:
                     dataMovie = self.thermalData
@@ -2377,7 +2407,10 @@ class ThermalVideoModel(QObject):
                         and self.videoData.loaded:
                     dataMovie = self.videoData
                 else:
-                    continue
+                    if dmovie_fname.suffix == '.csq':
+                        dataMovie = self.thermalData
+                    else:
+                        dataMovie = self.videoData
 
                 self.tracking_point[lab] = TrackingPoint(dataMovie)
                 for k, v in dobj.items():
@@ -2421,6 +2454,17 @@ class ThermalVideoModel(QObject):
     def save_tmp_status(self):
         self.save_status(fname=self.tmp_state_f)
         self.save_timer.start(self.save_tmp_wait * 1000)
+    
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def set_data_root(self, data_dir=None):
+        if data_dir is None:
+            stdir = self.DATA_ROOT
+            data_dir, _ = QFileDialog.getExistingDirectory(
+                self.main_win, "Set data root directory", str(stdir))
+            if data_dir == '':
+                return
+        
+        self.DATA_ROOT = data_dir
 
 
 # %% View class : MainWindow ==================================================
@@ -2429,7 +2473,7 @@ class MainWindow(QMainWindow):
     """
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def __init__(self, parent=None, batchmode=False):
+    def __init__(self, parent=None, batchmode=False, extract_temp_file=False):
         super(MainWindow, self).__init__(parent)
         self.setWindowTitle("Thermal Video Tracking")
 
@@ -2439,7 +2483,8 @@ class MainWindow(QMainWindow):
         self.init_ui_objects()
 
         # Init the model class
-        self.model = ThermalVideoModel(main_win=self, batchmode=batchmode)
+        self.model = ThermalVideoModel(main_win=self, batchmode=batchmode,
+            extract_temp_file=extract_temp_file)
 
         # Connect signals
         self.connect_signal_handlers()
@@ -2958,6 +3003,7 @@ class MainWindow(QMainWindow):
         # File menu
         fileMenu = menuBar.addMenu('&File')
 
+        # Save
         saveSettingAction = QAction('&Save woking state', self)
         saveSettingAction.setShortcut('Ctrl+S')
         saveSettingAction.setStatusTip('Save woking state')
@@ -2965,12 +3011,20 @@ class MainWindow(QMainWindow):
                                                     fname=None))
         fileMenu.addAction(saveSettingAction)
 
+        # Load
         loadSettingAction = QAction('&Load woking state', self)
         loadSettingAction.setShortcut('Ctrl+L')
         loadSettingAction.setStatusTip('Load woking state')
         loadSettingAction.triggered.connect(partial(self.model.load_status,
                                                     fname=None))
         fileMenu.addAction(loadSettingAction)
+
+        # Set DATA_ROOT
+        setDataRootAction = QAction('&Set data root', self)
+        setDataRootAction.setShortcut('Ctrl+D')
+        setDataRootAction.setStatusTip('Load woking state')
+        setDataRootAction.triggered.connect(self.model.set_data_root)
+        fileMenu.addAction(setDataRootAction)
 
         exitAction = QAction('&Exit', self)
         exitAction.setShortcut('Ctrl+Q')
@@ -3287,5 +3341,9 @@ if __name__ == '__main__':
     win.resize(1440, 840)
     win.move(0, 0)
     win.show()
+    try:
+        ret = app.exec_()
+    except Exception as e:
+        print(e)
 
-    sys.exit(app.exec_())
+    sys.exit(ret)
