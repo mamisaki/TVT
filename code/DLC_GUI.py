@@ -1800,7 +1800,7 @@ class ViewWindow(QMainWindow):
         self.roi_delete_btn.clicked.connect(
                 lambda: self.model.delete_point(point_name=None,
                                                 ask_confirm=True))
-        self.roi_load_btn.clicked.connect(self.model.load_tracking)
+        self.roi_load_btn.clicked.connect(partial(self.model.load_tracking, fileName=None))
         self.roi_export_btn.clicked.connect(self.model.export_roi_data)
 
         # Time-course plot
