@@ -31,6 +31,9 @@ import platform
 import pickle
 import shutil
 import time
+import gc
+import traceback
+import json
 
 import numpy as np
 import cv2
@@ -41,18 +44,20 @@ import pandas as pd
 from scipy import interpolate
 from scipy.fft import ifft, fft, fftfreq
 
-from PyQt5.QtCore import Qt, QObject, QTimer, pyqtSignal
+from PySide6.QtCore import Qt, QObject, QTimer
+from PySide6.QtCore import Signal as pyqtSignal
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QFrame, QFileDialog, QMessageBox,
         QVBoxLayout, QHBoxLayout, QGridLayout, QDialog,
-        QLabel, QSizePolicy, QPushButton, QStyle, QSlider, QAction, QComboBox,
+        QLabel, QSizePolicy, QPushButton, QStyle, QSlider, QComboBox,
         QSpinBox, QCheckBox, QSplitter, QGroupBox, QDoubleSpinBox, QLineEdit,
         QDialogButtonBox, QProgressDialog, QInputDialog)
-from PyQt5.QtGui import QImage, QPixmap
+
+from PySide6.QtGui import QImage, QPixmap, QAction
 
 # https://matplotlib.org/3.1.0/gallery/user_interfaces/embedding_in_qt_sgskip.html
-from matplotlib.backends.backend_qt5agg import FigureCanvas
+from matplotlib.backends.backend_qtagg import FigureCanvas
 
 import imageio
 
@@ -344,7 +349,7 @@ class ThermalDataMovie(DataMovie):
             self.thermal_data_reader.progressDlg = None
 
         self.frame_rate = self.thermal_data_reader.FrameRate
-        self.frame_rate = int(self.frame_rate * 100)/100
+        self.frame_rate = int(self.frame_rate * 100) / 100
 
         self.duration_frame = self.thermal_data_reader.Count
         super(ThermalDataMovie, self).open(filename)
@@ -631,13 +636,32 @@ class ThermalVideoModel(QObject):
     edit_point_signal = pyqtSignal(str)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def __init__(self, main_win, batchmode=False, extract_temp_file=False):
+    def __init__(self, main_win, batchmode=False, extract_temp_file=None):
         super(ThermalVideoModel, self).__init__(parent=main_win)
-
-        self.DATA_ROOT = APP_ROOT / 'data'
 
         # main_win object
         self.main_win = main_win
+        self.DATA_ROOT = APP_ROOT / 'data'
+
+        if extract_temp_file is None:
+            extract_temp_file = False
+
+        self.CONF_DIR = Path.home() / '.TVT'
+        if not self.CONF_DIR.is_dir():
+            self.CONF_DIR.mkdir()
+
+        self.conf_f = self.CONF_DIR / 'TVT_conf.json'
+        if self.conf_f.is_file():
+            try:
+                with open(self.conf_f, 'r') as fd:
+                    conf = json.load(fd)
+                
+                for k, v in conf.items():
+                    if k in ('DATA_ROOT',):
+                        v = Path(v)
+                    setattr(self, k, v)
+            except Exception:
+                pass
 
         # --- DataMovie objects -----------------------------------------------
         # Thermal data
@@ -750,12 +774,39 @@ class ThermalVideoModel(QObject):
         fileName = Path(fileName)
 
         self.thermalData.open(fileName)
-        self.time_marker = {}
-        self.main_win.unloadThermalDataBtn.setText(
-                f"Unload {Path(self.thermalData.filename).name}")
-        self.main_win.unloadThermalDataBtn.setEnabled(True)
-        self.main_win.exportThermalDataVideoBtn.setEnabled(True)
 
+        # Reset
+        self.time_marker = {}
+        self.videoData.paired_data = self.thermalData
+
+        # Point marker (black dot) position
+        self.point_mark_xy = [0, 0]
+        if self.main_win is not None:
+            self.main_win.videoDispImg.point_mark_xy = self.point_mark_xy
+            self.main_win.thermalDispImg.point_mark_xy = self.point_mark_xy
+
+        # Tracking point
+        self.tracking_mark = dict()  # tracking point marks on display
+        if self.main_win is not None:
+            self.main_win.videoDispImg.tracking_mark = self.tracking_mark
+            self.main_win.thermalDispImg.tracking_mark = self.tracking_mark
+
+            self.main_win.unloadThermalDataBtn.setText(
+                f"Unload {Path(self.thermalData.filename).name}")
+            self.main_win.unloadThermalDataBtn.setEnabled(True)
+            self.main_win.exportThermalDataVideoBtn.setEnabled(True)
+
+            del self.main_win.plot_ax
+            self.main_win.roi_plot_canvas.figure.clear()
+            self.main_win.plot_ax = \
+                self.main_win.roi_plot_canvas.figure.subplots(1, 1)
+            self.main_win.plot_xvals = None
+            self.main_win.plot_line = {}
+            self.main_win.plot_line_lpf = {}
+            self.main_win.plot_timeline = None
+            self.main_win.plot_marker_line = {}
+            self.main_win.roi_plot_canvas.setEnabled(False)
+            
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def set_thermal_clim(self, *args, **kwargs):
         if not self.thermalData.loaded:
@@ -799,14 +850,25 @@ class ThermalVideoModel(QObject):
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def unloadThermalData(self):
         self.thermalData.unload()
-        self.main_win.unloadThermalDataBtn.setText('Unload')
-        self.main_win.unloadThermalDataBtn.setEnabled(False)
-        self.main_win.exportThermalDataVideoBtn.setEnabled(False)
-        self.main_win.roi_ctrl_grpbx.setEnabled(False)
-        self.main_win.plot_xvals = None
-        self.main_win.plot_line = {}
-        self.main_win.plot_line_lpf = {}
-        self.main_win.plot_ax.cla()
+
+        self.time_marker = {}
+        self.tracking_mark = dict()  # tracking point marks on display
+        if self.main_win is not None:
+            self.main_win.unloadThermalDataBtn.setText('---')
+            self.main_win.unloadThermalDataBtn.setEnabled(False)
+            self.main_win.exportThermalDataVideoBtn.setEnabled(False)
+            self.main_win.roi_ctrl_grpbx.setEnabled(False)
+
+            del self.main_win.plot_ax
+            self.main_win.roi_plot_canvas.figure.clear()
+            self.main_win.plot_ax = \
+                self.main_win.roi_plot_canvas.figure.subplots(1, 1)
+            self.main_win.plot_xvals = None
+            self.main_win.plot_line = {}
+            self.main_win.plot_line_lpf = {}
+            self.main_win.plot_timeline = None
+            self.main_win.plot_marker_line = {}
+            self.main_win.roi_plot_canvas.setEnabled(False)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def exportThermalDataVideo(self):
@@ -1544,10 +1606,10 @@ class ThermalVideoModel(QObject):
                 self.main_win.plot_xvals = None
                 return
 
-            self.main_win.plot_xvals = \
-                xvals * (1.0/self.thermalData.frame_rate)
+            xunit = 1.0 / self.videoData.frame_rate
+            self.main_win.plot_xvals = xvals * xunit
             xvals = self.main_win.plot_xvals
-            self.main_win.plot_ax.set_xlim(xvals[0]-1, xvals[-1]+1)
+            self.main_win.plot_ax.set_xlim(xvals[0]-xunit, xvals[-1]+xunit)
 
             # Set xtick label
             xticks = self.main_win.plot_ax.get_xticks()
@@ -1563,6 +1625,7 @@ class ThermalVideoModel(QObject):
                     xtick_labs.append(tstr)
 
             self.main_win.plot_ax.set_xticks(xticks, xtick_labs)
+            self.main_win.plot_ax.set_xlim(xvals[0]-xunit, xvals[-1]+xunit)
 
         # --- Time line -------------------------------------------------------
         xpos = self.main_win.plot_xvals[self.thermalData.frame_position]
@@ -1894,9 +1957,13 @@ class ThermalVideoModel(QObject):
                                            f" {self.videoData.filename}.")
             return
 
-        if call == 'new_project':
+        if call == 'boot_dlc_gui':
+            cmd = "python -m deeplabcut"
+            self.dlci.boot_dlc_gui()
+
+        elif call == 'new_project':
             proj_name = self.videoData.filename.stem
-            experimenter_name = 'ThermalVideoTracking'
+            experimenter_name = 'TVT'
             video_files = [str(self.videoData.filename)]
             work_dir = self.videoData.filename.parent
             copy_videos = False
@@ -1988,6 +2055,10 @@ class ThermalVideoModel(QObject):
                 # Delte result files
                 for ff in res_fs:
                     ff.unlink()
+            
+            config_data = self.dlci.get_config()
+            if config_data['snapshotindex'] == -1:
+                 self.dlci.edit_config(edit_keys=['snapshotindex',])
 
             self.dlci.analyze_videos(self.videoData.filename)
 
@@ -2216,7 +2287,7 @@ class ThermalVideoModel(QObject):
         # --- Extract saving parameter values for the model object ---
         settings = {}
         saving_params = ['on_sync', 'time_marker', 'thermalData', 'videoData',
-                         'tracking_point', 'tracking_mark', 'dlci', 'lpf']
+                         'tracking_point', 'tracking_mark', 'dlci', 'lpf', 'DATA_ROOT']
         for param in saving_params:
             if not hasattr(self, param):
                 continue
@@ -2267,7 +2338,10 @@ class ThermalVideoModel(QObject):
         def path_to_rel(param):
             if type(param) is dict:
                 for k, v in param.items():
-                    param[k] = path_to_rel(v)
+                    if k == 'DATA_ROOT':
+                        param[k] = Path(v)
+                    else:
+                        param[k] = path_to_rel(v)
             else:
                 if isinstance(param, Path):
                     if param.is_relative_to(self.DATA_ROOT):
@@ -2315,7 +2389,12 @@ class ThermalVideoModel(QObject):
                 fname != APP_ROOT / 'config' / 'last_working_state-0.pkl':
             self.loaded_state_f = Path(fname)
 
-        path_rep = None
+        # Load DATA_ROOT
+        if 'DATA_ROOT' in settings:
+            if Path(settings['DATA_ROOT']).is_dir():
+                self.DATA_ROOT = Path(settings['DATA_ROOT'])
+                self.dlci.DATA_ROOT = self.DATA_ROOT
+            del settings['DATA_ROOT']
 
         # Load thermalData
         if 'thermalData' in settings:
@@ -2325,12 +2404,13 @@ class ThermalVideoModel(QObject):
                 fname = self.thermalData.filename
                 if isinstance(fname, Path):
                     self.DATA_ROOT = self.thermalData.filename.parent
-            else:
-                self.openThermalFile(fileName=fname)
             
-            fname = self.thermalData.filename
             if isinstance(fname, Path) and fname.is_file():
+                self.openThermalFile(fileName=fname)
                 frame_position = settings['thermalData']['frame_position']
+                self.main_win.thermal_clim_fix_chbx.blockSignals(True)
+                self.main_win.thermal_clim_fix_chbx.setChecked(False)
+                self.main_win.thermal_clim_fix_chbx.blockSignals(False)
                 self.thermalData.show_frame(frame_idx=frame_position)
 
             del settings['thermalData']
@@ -2338,7 +2418,7 @@ class ThermalVideoModel(QObject):
         # thermal_clim
         if 'thermal_clim_fix' in settings:
             self.main_win.thermal_clim_fix_chbx.blockSignals(True)
-            self.main_win.thermal_clim_fix_chbx.setCheckState(
+            self.main_win.thermal_clim_fix_chbx.setChecked(
                     settings['thermal_clim_fix'])
             self.main_win.thermal_clim_fix_chbx.blockSignals(False)
             if settings['thermal_clim_fix'] > 0:
@@ -2367,7 +2447,7 @@ class ThermalVideoModel(QObject):
                 self.openVideoFile(fileName=fname)
 
             fname = self.thermalData.filename
-            if fname.is_file():
+            if fname and fname.is_file():
                 frame_position = settings['videoData']['frame_position']
                 self.videoData.show_frame(frame_idx=frame_position)
 
@@ -2453,6 +2533,8 @@ class ThermalVideoModel(QObject):
             if hasattr(self, param):
                 setattr(self, param, obj)
         
+        gc.collect()
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def save_tmp_status(self):
         self.save_status(fname=self.tmp_state_f)
@@ -2461,13 +2543,18 @@ class ThermalVideoModel(QObject):
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def set_data_root(self, data_dir=None):
         if data_dir is None:
-            stdir = self.DATA_ROOT
-            data_dir, _ = QFileDialog.getExistingDirectory(
-                self.main_win, "Set data root directory", str(stdir))
+            if self.DATA_ROOT.is_dir():
+                stdir = self.DATA_ROOT.parent
+            else:
+                stdir = APP_ROOT
+            data_dir = QFileDialog.getExistingDirectory(
+                self.main_win, "Select data directory",
+                str(stdir), QFileDialog.ShowDirsOnly)
             if data_dir == '':
                 return
-        
-        self.DATA_ROOT = data_dir
+
+        self.DATA_ROOT = Path(data_dir)
+        self.dlci.DATA_ROOT = self.DATA_ROOT
 
 
 # %% View class : MainWindow ==================================================
@@ -2476,7 +2563,7 @@ class MainWindow(QMainWindow):
     """
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def __init__(self, parent=None, batchmode=False, extract_temp_file=False):
+    def __init__(self, parent=None, batchmode=False, extract_temp_file=None):
         super(MainWindow, self).__init__(parent)
         self.setWindowTitle("Thermal Video Tracking")
 
@@ -2682,7 +2769,7 @@ class MainWindow(QMainWindow):
 
         self.roi_name_ledit = QLineEdit()
         self.roi_showName_chbx = QCheckBox('Show name')
-        self.roi_showName_chbx.setCheckState(2)
+        self.roi_showName_chbx.setChecked(True)
 
         self.roi_x_spbx = QSpinBox()
         self.roi_x_spbx.setMinimum(-1)
@@ -2716,7 +2803,7 @@ class MainWindow(QMainWindow):
         self.roi_jump_max_btn = QPushButton('to max')
 
         self.roi_online_plot_chbx = QCheckBox('Online plot')
-        self.roi_online_plot_chbx.setCheckState(2)
+        self.roi_online_plot_chbx.setChecked(True)
         self.roi_plot_btn = QPushButton('Plot all')
 
         self.roi_LPF_lb = QLabel('Low-pass filter (Hz)')
@@ -3004,16 +3091,8 @@ class MainWindow(QMainWindow):
         # --- Menu bar ---
         menuBar = self.menuBar()
 
-        # File menu
+        # -- File menu --
         fileMenu = menuBar.addMenu('&File')
-
-        # Save
-        saveSettingAction = QAction('&Save woking state', self)
-        saveSettingAction.setShortcut('Ctrl+S')
-        saveSettingAction.setStatusTip('Save woking state')
-        saveSettingAction.triggered.connect(partial(self.model.save_status,
-                                                    fname=None))
-        fileMenu.addAction(saveSettingAction)
 
         # Load
         loadSettingAction = QAction('&Load woking state', self)
@@ -3023,13 +3102,23 @@ class MainWindow(QMainWindow):
                                                     fname=None))
         fileMenu.addAction(loadSettingAction)
 
+        # Save
+        saveSettingAction = QAction('&Save woking state', self)
+        saveSettingAction.setShortcut('Ctrl+S')
+        saveSettingAction.setStatusTip('Save woking state')
+        saveSettingAction.triggered.connect(partial(self.model.save_status,
+                                                    fname=None))
+        fileMenu.addAction(saveSettingAction)
+
         # Set DATA_ROOT
         setDataRootAction = QAction('&Set data root', self)
         setDataRootAction.setShortcut('Ctrl+D')
         setDataRootAction.setStatusTip('Load woking state')
-        setDataRootAction.triggered.connect(self.model.set_data_root)
+        setDataRootAction.triggered.connect(
+            partial(self.model.set_data_root, data_dir=None))
         fileMenu.addAction(setDataRootAction)
 
+        # Exit
         exitAction = QAction('&Exit', self)
         exitAction.setShortcut('Ctrl+Q')
         exitAction.setStatusTip('Exit application')
@@ -3038,6 +3127,12 @@ class MainWindow(QMainWindow):
 
         # -- DLC menu --
         dlcMenu = menuBar.addMenu('&DLC')
+
+        # -- Boot deeplabcut GUI ---
+        action = QAction('deeplabcut GUI', self)
+        action.setStatusTip('Boot deeplabcut GUI application')
+        action.triggered.connect(partial(self.model.dlc_call, 'boot_dlc_gui'))
+        dlcMenu.addAction(action)
 
         # -- I --
         action = QAction('New project', self)
@@ -3212,7 +3307,7 @@ class MainWindow(QMainWindow):
                 layout.addLayout(hbox)
 
         dlg = EditConfigDlg(self, config_data)
-        res = dlg.exec_()
+        res = dlg.exec()
         if res == 0:
             return None
 
@@ -3307,7 +3402,6 @@ class MainWindow(QMainWindow):
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def exitCall(self):
         self.close()
-        sys.exit(app.exec_())
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def closeEvent(self, event):
@@ -3330,15 +3424,32 @@ class MainWindow(QMainWindow):
         if self.model.tmp_state_f.is_file():
             self.model.tmp_state_f.unlink()
 
+        if self.model.CONF_DIR.is_dir():
+            for rmf in self.model.CONF_DIR.glob('*.fff'):
+                rmf.unlink()
+            
+            conf = {'DATA_ROOT': str(self.model.DATA_ROOT)}
+            with open(self.model.conf_f, 'w') as fd:
+                json.dump(conf, fd)
+        
+        self.deleteLater()
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def mouseDoubleClickEvent(self, e):
         """For debug
         """
         print(self.width(), self.height())
 
+# %%
+def excepthook(exc_type, exc_value, exc_tb):
+    tb = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    print("error catched!:")
+    print("error message:\n", tb)
+
 
 # %% main =====================================================================
 if __name__ == '__main__':
+    sys.excepthook = excepthook
     app = QApplication(sys.argv)
     win = MainWindow()
 
@@ -3346,9 +3457,5 @@ if __name__ == '__main__':
     win.resize(1440, 840)
     win.move(0, 0)
     win.show()
-    try:
-        ret = app.exec_()
-    except Exception as e:
-        print(e)
-
+    ret = app.exec()
     sys.exit(ret)

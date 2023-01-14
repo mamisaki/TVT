@@ -6,7 +6,7 @@ The code follows the model view architecture
 Model class: DLC_GUI
     Core functions
 View class: ViewWindow
-    User interface class. QMainWindow of PyQt5.
+    User interface class. QMainWindow of PySide6.
 View Model class: ViewModel
     Handling user inputs from the ViewWindow, calling functions in
     DLC_Interface_Model, and updating a view in the ViewWindow.
@@ -29,7 +29,7 @@ Create deeplabcut environment
 """
 
 
-# %% import
+# %% import -------------------------------------------------------------------
 import os
 from pathlib import Path, PurePath
 import sys
@@ -40,6 +40,7 @@ import platform
 import re
 import shutil
 import time
+import json
 
 import numpy as np
 import pandas as pd
@@ -47,16 +48,18 @@ import csv
 import cv2
 
 from matplotlib.figure import Figure
-from matplotlib.backends.backend_qt5agg import FigureCanvas
+from matplotlib.backends.backend_qtagg import FigureCanvas
 
+from PySide6.QtCore import Qt, QObject, QTimer
+from PySide6.QtCore import Signal as pyqtSignal
 
-from PyQt5.QtCore import Qt, QObject, QTimer, pyqtSignal
-
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication, QMainWindow, QDialog, QFrame, QFileDialog, QMessageBox,
     QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QSizePolicy, QPushButton,
-    QStyle, QSlider, QAction, QComboBox, QSpinBox, QSplitter, QGroupBox,
+    QStyle, QSlider, QComboBox, QSpinBox, QSplitter, QGroupBox,
     QLineEdit, QDialogButtonBox, QSpacerItem, QInputDialog, QCheckBox)
+
+from PySide6.QtGui import QAction
 
 from data_movie import DataMovie, DisplayImage
 from dlc_interface import DLCinter
@@ -275,6 +278,7 @@ class DLC_GUI(QObject):
         # View model
         self.main_win = main_win
         self.tracking_point_pen_color_default = tracking_point_pen_color_default
+        self.DATA_ROOT = APP_ROOT / 'data'
 
         # --- Video data ------------------------------------------------------
         video_UI_objs = {'frFwdBtn': self.main_win.videoFrameFwdBtn,
@@ -288,6 +292,23 @@ class DLC_GUI(QObject):
         # Point marker (black dot) position
         self.point_mark_xy = [0, 0]
         self.main_win.videoDispImg.point_mark_xy = self.point_mark_xy
+
+        self.CONF_DIR = Path.home() / '.TVT'
+        if not self.CONF_DIR.is_dir():
+            self.CONF_DIR.mkdir()
+
+        self.conf_f = self.CONF_DIR / 'DLCGUI_conf.json'
+        if self.conf_f.is_file():
+            try:
+                with open(self.conf_f, 'r') as fd:
+                    conf = json.load(fd)
+                
+                for k, v in conf.items():
+                    if k in ('DATA_ROOT',):
+                        v = Path(v)
+                    setattr(self, k, v)
+            except Exception:
+                pass
 
         # --- movie parameters ------------------------------
         self.common_time_ms = 0
@@ -310,7 +331,7 @@ class DLC_GUI(QObject):
         self.editRange = 'current'
 
         # --- DeepLabCut interface --------------------------------------------
-        self.dlci = DLCinter(APP_ROOT, ui_parent=self.main_win)
+        self.dlci = DLCinter(self.DATA_ROOT, ui_parent=self.main_win)
 
         # --- Connect signals -------------------------------------------------
         self.move_point_signal.connect(self.update_dispImg)
@@ -350,7 +371,7 @@ class DLC_GUI(QObject):
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def openVideoFile(self, *args, fileName=None, **kwargs):
         if fileName is None:
-            stdir = APP_ROOT / 'data'
+            stdir = self.DATA_ROOT
             fileName, _ = QFileDialog.getOpenFileName(
                 self.main_win, "Open Movie", str(stdir),
                 "movie files (*.mp4 *.avi);; all (*.*)", None,
@@ -383,7 +404,7 @@ class DLC_GUI(QObject):
         self.tracking_points = {}
 
         # Reset dlci
-        self.dlci = DLCinter(APP_ROOT, parent=self.parent)
+        self.dlci = DLCinter(self.DATA_ROOT, parent=self.parent)
 
         # Disable UIs
         self.main_win.positionSlider.setEnabled(False)
@@ -511,10 +532,6 @@ class DLC_GUI(QObject):
             self.main_win.roi_rad_spbx.setValue(tracking_point_radius_default)
             self.main_win.roi_color_cmbbx.setCurrentText(
                 self.tracking_point_pen_color_default)
-            pcols =  list(pen_color_rgb.keys())
-            cidx = pcols.index(self.tracking_point_pen_color_default)
-            cidx = (cidx+1) % len(pcols)
-            self.tracking_point_pen_color_default = pcols[cidx]
 
         # unblock signals
         self.main_win.roi_idx_cmbbx.blockSignals(False)
@@ -944,10 +961,10 @@ class DLC_GUI(QObject):
                 self.main_win.plot_xvals = None
                 return
 
-            self.main_win.plot_xvals = \
-                xvals * (1.0/self.videoData.frame_rate)
+            xunit = 1.0 / self.videoData.frame_rate
+            self.main_win.plot_xvals = xvals * xunit
             xvals = self.main_win.plot_xvals
-            self.main_win.plot_ax.set_xlim(xvals[0]-1, xvals[-1]+1)
+            self.main_win.plot_ax.set_xlim(xvals[0]-xunit, xvals[-1]+xunit)
 
             # Set xtick label
             xticks = self.main_win.plot_ax.get_xticks()
@@ -963,6 +980,7 @@ class DLC_GUI(QObject):
                     xtick_labs.append(tstr)
 
             self.main_win.plot_ax.set_xticks(xticks, xtick_labs)
+            self.main_win.plot_ax.set_xlim(xvals[0]-xunit, xvals[-1]+xunit)
 
         # --- Time line -------------------------------------------------------
         xpos = self.main_win.plot_xvals[self.videoData.frame_position]
@@ -1386,7 +1404,7 @@ class DLC_GUI(QObject):
         # --- Extract saving parameter values for the model object ---
         settings = {}
         saving_params = ['time_marker', 'videoData', 'tracking_point',
-                         'tracking_mark', 'dlci']
+                         'tracking_mark', 'dlci', 'DATA_ROOT']
         for param in saving_params:
             if not hasattr(self, param):
                 continue
@@ -1428,10 +1446,14 @@ class DLC_GUI(QObject):
         def path_to_rel(param):
             if type(param) is dict:
                 for k, v in param.items():
-                    param[k] = path_to_rel(v)
+                    if k == 'DATA_ROOT':
+                        param[k] = Path(v)
+                    else:
+                        param[k] = path_to_rel(v)
             else:
                 if isinstance(param, Path):
-                    param = PurePath(os.path.relpath(param, APP_ROOT))
+                    if param.is_relative_to(self.DATA_ROOT):
+                        param = PurePath(param.relative_to(self.DATA_ROOT))
 
             return param
 
@@ -1475,9 +1497,16 @@ class DLC_GUI(QObject):
                 fname != APP_ROOT / 'config' / 'DLCGUI_last_working_state-0.pkl':
             self.loaded_state_f = Path(fname)
 
+        # Load DATA_ROOT
+        if 'DATA_ROOT' in settings:
+            if Path(settings['DATA_ROOT']).is_dir():
+                self.DATA_ROOT = Path(settings['DATA_ROOT'])
+                self.dlci.DATA_ROOT = self.DATA_ROOT
+            del settings['DATA_ROOT']
+
         # Load videoData
         if 'videoData' in settings:
-            fname = APP_ROOT / settings['videoData']['filename']
+            fname = self.DATA_ROOT / settings['videoData']['filename']
             frame_position = settings['videoData']['frame_position']
             if fname.is_file():
                 self.openVideoFile(fileName=fname)
@@ -1500,13 +1529,13 @@ class DLC_GUI(QObject):
 
         # Load DLC config
         if 'dlci' in settings:
-            self.dlci.config_path = APP_ROOT / settings['dlci']['_config_path']
+            self.dlci.config_path = self.DATA_ROOT / settings['dlci']['_config_path']
             del settings['dlci']
 
         # Load tracking_point
         if 'tracking_point' in settings:
             for lab, dobj in settings['tracking_point'].items():
-                dmovie_fname = str(APP_ROOT / dobj['dataMovie.filename'])
+                dmovie_fname = str(self.DATA_ROOT / dobj['dataMovie.filename'])
                 if dmovie_fname == str(self.videoData.filename) \
                         and self.videoData.loaded:
                     dataMovie = self.videoData
@@ -1550,6 +1579,22 @@ class DLC_GUI(QObject):
     def save_tmp_status(self):
         self.save_status(fname=self.tmp_state_f)
         self.save_timer.start(self.save_tmp_wait * 1000)
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def set_data_root(self, data_dir=None):
+        if data_dir is None:
+            if self.DATA_ROOT.is_dir():
+                stdir = self.DATA_ROOT.parent
+            else:
+                stdir = APP_ROOT
+            data_dir = QFileDialog.getExistingDirectory(
+                self.main_win, "Select data directory",
+                str(stdir), QFileDialog.ShowDirsOnly)
+            if data_dir == '':
+                return
+
+        self.DATA_ROOT = Path(data_dir)
+        self.dlci.DATA_ROOT = self.DATA_ROOT
 
 
 # %% View class : ViewWindow ==================================================
@@ -1660,7 +1705,7 @@ class ViewWindow(QMainWindow):
 
         self.roi_name_ledit = QLineEdit()
         self.roi_showName_chbx = QCheckBox('Show name')
-        self.roi_showName_chbx.setCheckState(2)
+        self.roi_showName_chbx.setChecked(True)
 
         self.roi_x_spbx = QSpinBox()
         self.roi_x_spbx.setMinimum(-1)
@@ -1888,16 +1933,10 @@ class ViewWindow(QMainWindow):
         # --- Menu bar ---
         menuBar = self.menuBar()
 
-        # File menu
+        # -- File menu --
         fileMenu = menuBar.addMenu('&File')
 
-        saveSettingAction = QAction('&Save woking state', self)
-        saveSettingAction.setShortcut('Ctrl+S')
-        saveSettingAction.setStatusTip('Save woking state')
-        saveSettingAction.triggered.connect(partial(self.model.save_status,
-                                                    fname=None))
-        fileMenu.addAction(saveSettingAction)
-
+        # Load
         loadSettingAction = QAction('&Load woking state', self)
         loadSettingAction.setShortcut('Ctrl+L')
         loadSettingAction.setStatusTip('Load woking state')
@@ -1905,6 +1944,23 @@ class ViewWindow(QMainWindow):
                                                     fname=None))
         fileMenu.addAction(loadSettingAction)
 
+        # Save
+        saveSettingAction = QAction('&Save woking state', self)
+        saveSettingAction.setShortcut('Ctrl+S')
+        saveSettingAction.setStatusTip('Save woking state')
+        saveSettingAction.triggered.connect(partial(self.model.save_status,
+                                                    fname=None))
+        fileMenu.addAction(saveSettingAction)
+
+        # Set DATA_ROOT
+        setDataRootAction = QAction('&Set data root', self)
+        setDataRootAction.setShortcut('Ctrl+D')
+        setDataRootAction.setStatusTip('Load woking state')
+        setDataRootAction.triggered.connect(
+            partial(self.model.set_data_root, data_dir=None))
+        fileMenu.addAction(setDataRootAction)
+
+        # Exit
         exitAction = QAction('&Exit', self)
         exitAction.setShortcut('Ctrl+Q')
         exitAction.setStatusTip('Exit application')
@@ -1913,6 +1969,12 @@ class ViewWindow(QMainWindow):
 
         # -- DLC menu --
         dlcMenu = menuBar.addMenu('&DLC')
+
+        # -- Boot deeplabcut GUI ---
+        action = QAction('deeplabcut GUI', self)
+        action.setStatusTip('Boot deeplabcut GUI application')
+        action.triggered.connect(partial(self.model.dlc_call, 'boot_dlc_gui'))
+        dlcMenu.addAction(action)
 
         # -- I --
         action = QAction('New project', self)
@@ -2079,7 +2141,7 @@ class ViewWindow(QMainWindow):
                 layout.addLayout(hbox)
 
         dlg = EditConfigDlg(self, config_data)
-        res = dlg.exec_()
+        res = dlg.exec()
         if res == 0:
             return None
 
@@ -2188,19 +2250,37 @@ class ViewWindow(QMainWindow):
         if self.model.tmp_state_f.is_file():
             self.model.tmp_state_f.unlink()
 
+        if self.model.CONF_DIR.is_dir():
+            for rmf in self.model.CONF_DIR.glob('*.fff'):
+                rmf.unlink()
+            
+            conf = {'DATA_ROOT': str(self.model.DATA_ROOT)}
+            with open(self.model.conf_f, 'w') as fd:
+                json.dump(conf, fd)
+        
+        self.deleteLater()
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def mouseDoubleClickEvent(self, e):
         """For debug
         """
         print(self.width(), self.height())
 
+# %%
+def excepthook(exc_type, exc_value, exc_tb):
+    tb = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    print("error catched!:")
+    print("error message:\n", tb)
+
 
 # %% main =====================================================================
 if __name__ == '__main__':
+    sys.excepthook = excepthook
     app = QApplication(sys.argv)
     win = ViewWindow()
+    
     win.resize(890, 830)
     win.move(0, 0)
     win.show()
-    ret = app.exec_()
+    ret = app.exec()
     sys.exit(ret)

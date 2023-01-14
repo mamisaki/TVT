@@ -14,8 +14,8 @@ import numpy as np
 import cv2
 import imageio
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QProgressDialog
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QProgressDialog
 
 from csq_reader import CSQ_READER
 

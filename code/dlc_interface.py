@@ -27,15 +27,32 @@ import re
 import pickle
 from contextlib import redirect_stdout
 import traceback
+import unicodedata
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 import numpy as np
 import deeplabcut as dlc
+from deeplabcut.utils import auxiliaryfunctions
 import yaml
 
-OS = platform.system()
-HOSTNAME = socket.gethostname()
+
+# %%
+def slugify(value, allow_unicode=True):
+    """
+    Taken from https://github.com/django/django/blob/master/django/utils/text.py
+    Convert to ASCII if 'allow_unicode' is False. Convert spaces or repeated
+    dashes to single dashes. Remove characters that aren't alphanumerics,
+    underscores, or hyphens. Convert to lowercase. Also strip leading and
+    trailing whitespace, dashes, and underscores.
+    """
+    value = str(value)
+    if allow_unicode:
+        value = unicodedata.normalize('NFKC', value)
+    else:
+        value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
+    value = re.sub(r'[^\w\s-]', '', value.lower())
+    return re.sub(r'[-\s]+', '-', value).strip('-_')
 
 
 # %% DLCinter
@@ -52,6 +69,8 @@ class DLCinter():
         config_path: Path or string (optional)
             Path to a config file (.yaml).
         """
+        self.OS = platform.system()
+        self.HOSTNAME = slugify(socket.gethostname())
 
         self.DATA_ROOT = DATA_ROOT
         self._config_path = None  # config file portable across hosts
@@ -102,6 +121,11 @@ class DLCinter():
         self.set_config(config_path0)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def boot_dlc_gui(self):
+        cmd = 'python -m deeplabcut'
+        subprocess.Popen(shlex.split(cmd))
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def set_config(self, config_path0):
         """Set config file (_config_path, _config_work_path) with converting
         paths. Convert paths in config to a relative one from DATA_ROOT or vice
@@ -134,7 +158,7 @@ class DLCinter():
             config_data['project_path'] = project_path
             config_data['video_sets'] = video_sets
 
-            out_f = Path(config_path0).parent / f'config_{HOSTNAME}.yaml'
+            out_f = Path(config_path0).parent / f'config_{self.HOSTNAME}.yaml'
             self._config_path = config_path0
             self._config_work_path = out_f
 
@@ -148,17 +172,25 @@ class DLCinter():
                 return
 
             # convert to relative path
-            project_path = os.path.relpath(
-                    Path(config_data['project_path']).absolute(),
-                    self.DATA_ROOT)
-            project_path = str(project_path).replace(os.sep, '/')
-            project_path = '${DATA_ROOT}/' + project_path
+            project_path = Path(config_data['project_path']).resolve()
+            DATA_ROOT = self.DATA_ROOT.resolve()
+            try:
+                project_path = os.path.relpath(project_path, DATA_ROOT)
+                project_path = str(project_path).replace(os.sep, '/')
+                project_path = '${DATA_ROOT}/' + project_path
+            except Exception:
+                project_path = Path(config_data['project_path'])
+                project_path = str(project_path).replace(os.sep, '/')
+                print(project_path)
 
             video_sets = {}
             for vf0 in config_data['video_sets'].keys():
-                vf = os.path.relpath(Path(vf0).absolute(), self.DATA_ROOT)
-                vf = str(vf).replace(os.sep, '/')
-                vf = '${DATA_ROOT}/' + vf
+                try:
+                    vf = os.path.relpath(Path(vf0).resolve(), DATA_ROOT)
+                    vf = str(vf).replace(os.sep, '/')
+                    vf = '${DATA_ROOT}/' + vf
+                except Exception:
+                    vf = str(vf0)
                 video_sets[vf] = config_data['video_sets'][vf0]
 
             config_data['project_path'] = project_path
@@ -169,7 +201,7 @@ class DLCinter():
             self._config_path = out_f
 
             # Copy config_path0
-            cp_f = Path(config_path0).parent / f'config_{HOSTNAME}.yaml'
+            cp_f = Path(config_path0).parent / f'config_{self.HOSTNAME}.yaml'
             if cp_f != Path(config_path0):
                 shutil.copy(config_path0, cp_f)
             self._config_work_path = cp_f
@@ -216,7 +248,7 @@ class DLCinter():
         """
 
         # Create new DLC project
-        if OS == 'Windows':
+        if self.OS == 'Windows':
             copy_videos = True
 
         iof = io.StringIO()
@@ -276,7 +308,7 @@ class DLCinter():
         return config_data
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def edit_config(self, edit_gui_fn, edit_keys=None, default_values=None,
+    def edit_config(self, edit_gui_fn=None, edit_keys=None, default_values=None,
                     gui_title='Edit DLC configuration'):
         if not self.check_config_file():
             return
@@ -290,12 +322,6 @@ class DLCinter():
         # Read config file
         config_data = self.get_config()
 
-        # Set default values
-        if default_values is not None:
-            for k, v in default_values.items():
-                if k in config_data:
-                    config_data[k] = v
-
         editing_config_data = {}
         for k in edit_keys:
             if k in config_data:
@@ -308,11 +334,12 @@ class DLCinter():
                     editing_config_data[k] = v
 
         # Edit config
-        try:
-            editing_config_data = edit_gui_fn(editing_config_data, gui_title)
-        except Exception:
-            print(traceback.format_exc())
-            editing_config_data = None
+        if edit_gui_fn is not None:
+            try:
+                editing_config_data = edit_gui_fn(editing_config_data, gui_title)
+            except Exception:
+                print(traceback.format_exc())
+                editing_config_data = None
 
         if editing_config_data is None:
             return -1
@@ -444,12 +471,22 @@ class DLCinter():
                             gui_title='Set body parts') < 0:
             return
 
-        if OS == 'Darwin':
-            pycmd = 'import deeplabcut as dlc; '
-            pycmd += f'config_path = "{self._config_work_path}"; '
-            pycmd += 'dlc.label_frames(config_path)'
-            cmd = f"pythonw -c '{pycmd}'"
+        if self.OS == 'Darwin':
+            pycmd = "import deeplabcut as dlc; "
+            pycmd += f"config_path = '{self._config_work_path}'; "
+            pycmd += "dlc.label_frames(config_path)"
+            cmd = f'pythonw -c "{pycmd}"'
             subprocess.check_call(shlex.split(cmd))
+        elif self.OS == 'Windows':
+            cmd = "python -m deeplabcut"
+            subprocess.check_call(shlex.split(cmd))
+
+            iof = io.StringIO()
+            with redirect_stdout(iof):
+                dlc.label_frames(self._config_work_path)
+            ostr = iof.getvalue()
+            if len(ostr):
+                self.show_msg(iof.getvalue())
         else:
             iof = io.StringIO()
             with redirect_stdout(iof):
@@ -504,7 +541,7 @@ class DLCinter():
             return
 
         # --- Check running process -------------------------------------------
-        if OS == 'Windows':
+        if self.OS == 'Windows':
             cmd = 'tasklist | FIND "run_dlc_train.py"'
             try:
                 out = subprocess.check_output(cmd, shell=True)
@@ -530,7 +567,7 @@ class DLCinter():
                 pass
 
         # --- Make training script --------------------------------------------
-        work_dir = Path(self._config_work_path).absolute().parent
+        work_dir = Path(self._config_work_path).resolve().parent
 
         # Update config_rel.yaml file
         self.set_config(self._config_work_path)
@@ -546,7 +583,7 @@ class DLCinter():
         cmd = f'python {cmd_path} --config {conf_path} --create_training_dset'
         cmd += " --evaluate_network"
         if len(analyze_videos):
-            video_path = [os.path.relpath(pp, work_dir)
+            video_path = [str(Path(os.path.relpath(pp.resolve(), work_dir)))
                           for pp in analyze_videos]
             cmd += f" --analyze_videos {' '.join(video_path)}"
             cmd += " --filterpredictions"
@@ -554,7 +591,7 @@ class DLCinter():
         with open(script_f, 'w') as fd:
             fd.write(cmd)
 
-        if OS == 'Windows':
+        if self.OS == 'Windows':
             run_cmd = f"bash.exe {script_f.name}"
         else:
             run_cmd = f"/bin/bash {script_f.name}"
@@ -594,12 +631,17 @@ class DLCinter():
         if snapshotindex == -1:
             trainFraction = config_data['TrainingFraction'][0]
             modelfolder = Path(config_data["project_path"])
-            GetModelFolder = dlc.utils.auxiliaryfunctions.GetModelFolder
+            GetModelFolder = auxiliaryfunctions.get_model_folder
             modelfolder /= GetModelFolder(trainFraction, shuffle,
                                           config_data)
             Snapshots = [int(re.search(r'\d+', fn.stem).group())
                          for fn in (modelfolder / 'train').glob('*.index')]
-            snapshotindex = np.max(Snapshots)
+            if len(Snapshots):
+                snapshotindex = np.max(Snapshots)
+                self.edit_config(edit_keys=['snapshotindex',],
+                    default_values={'snapshotindex': int(snapshotindex)})
+            else:
+                return []
 
         pred_f_temp = f"{videoname}DeepCut_resnet50_{Task}{date}"
         pred_f_temp += f"shuffle{shuffle}_{snapshotindex}*"
@@ -691,7 +733,7 @@ class DLCinter():
         if not self.check_config_file():
             return
 
-        if OS == 'Darwin':
+        if self.OS == 'Darwin':
             pycmd = 'import deeplabcut as dlc; '
             pycmd += f'config_path = "{self._config_work_path}"; '
             pycmd += 'dlc.refine_labels(config_path)'

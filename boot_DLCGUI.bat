@@ -1,3 +1,3 @@
-call %HOMEPATH%\Anaconda3\condabin\activate DLC-CPU
+call %HOMEPATH%\Anaconda3\condabin\activate DEEPLABCUT
 cd %HOMEPATH%\TVT\code
-python TVT.py
+python DLC_GUI.py

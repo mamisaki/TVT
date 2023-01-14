@@ -13,9 +13,9 @@ import pickle
 import numpy as np
 import cv2
 
-from PyQt5.QtCore import Qt, QPoint
-from PyQt5.QtWidgets import QLabel, QSizePolicy
-from PyQt5.QtGui import QImage, QPainter, QPen, QPixmap
+from PySide6.QtCore import Qt, QPoint
+from PySide6.QtWidgets import QLabel, QSizePolicy
+from PySide6.QtGui import QImage, QPainter, QPen, QPixmap
 
 
 # %% DataMovie class ==========================================================
