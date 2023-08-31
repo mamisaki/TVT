@@ -22,7 +22,6 @@ View classe:
 
 # %% import ===================================================================
 from pathlib import Path, PurePath
-import os
 import sys
 from datetime import timedelta
 import re
@@ -176,7 +175,7 @@ class TrackingPoint():
             return
 
         self.value_ts[:] = np.nan
-        self.value_ts[xyt[:, 2].astype(np.int)] = vals[0]
+        self.value_ts[xyt[:, 2].astype(int)] = vals[0]
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def resampled_pos(self, common_time_ms):
@@ -335,7 +334,7 @@ class ThermalDataMovie(DataMovie):
 
             try:
                 cr = CSQ_READER(filename, progressDlg=progressDlg,
-                    extract_temp_file=self.extract_temp_file)
+                                extract_temp_file=self.extract_temp_file)
             except Exception as e:
                 print(e)
                 return
@@ -655,7 +654,7 @@ class ThermalVideoModel(QObject):
             try:
                 with open(self.conf_f, 'r') as fd:
                     conf = json.load(fd)
-                
+
                 for k, v in conf.items():
                     if k in ('DATA_ROOT',):
                         v = Path(v)
@@ -666,22 +665,23 @@ class ThermalVideoModel(QObject):
         # --- DataMovie objects -----------------------------------------------
         # Thermal data
         if self.main_win is not None:
-            thermal_UI_objs = {'frFwdBtn': self.main_win.thermalFrameFwdBtn,
-                            'frBkwBtn': self.main_win.thermalFrameBkwBtn,
-                            'skipFwdBtn': self.main_win.thermalSkipFwdBtn,
-                            'skipBkwBtn': self.main_win.thermalSkipBkwBtn,
-                            'positionLabel': self.main_win.thermalPositionLab,
-                            'syncBtn': self.main_win.syncVideoBtn}
-            self.thermalData = ThermalDataMovie(self, self.main_win.thermalDispImg,
-                                                thermal_UI_objs,
-                                                extract_temp_file=extract_temp_file)
+            thermal_UI_objs = {
+                'frFwdBtn': self.main_win.thermalFrameFwdBtn,
+                'frBkwBtn': self.main_win.thermalFrameBkwBtn,
+                'skipFwdBtn': self.main_win.thermalSkipFwdBtn,
+                'skipBkwBtn': self.main_win.thermalSkipBkwBtn,
+                'positionLabel': self.main_win.thermalPositionLab,
+                'syncBtn': self.main_win.syncVideoBtn}
+            self.thermalData = ThermalDataMovie(
+                self, self.main_win.thermalDispImg, thermal_UI_objs,
+                extract_temp_file=extract_temp_file)
 
             video_UI_objs = {'frFwdBtn': self.main_win.videoFrameFwdBtn,
-                            'frBkwBtn': self.main_win.videoFrameBkwBtn,
-                            'skipFwdBtn': self.main_win.videoSkipFwdBtn,
-                            'skipBkwBtn': self.main_win.videoSkipBkwBtn,
-                            'positionLabel': self.main_win.videoPositionLab,
-                            'syncBtn': self.main_win.syncVideoBtn}
+                             'frBkwBtn': self.main_win.videoFrameBkwBtn,
+                             'skipFwdBtn': self.main_win.videoSkipFwdBtn,
+                             'skipBkwBtn': self.main_win.videoSkipBkwBtn,
+                             'positionLabel': self.main_win.videoPositionLab,
+                             'syncBtn': self.main_win.syncVideoBtn}
         self.videoData = VideoDataMovie(self, self.main_win.videoDispImg,
                                         video_UI_objs)
 
@@ -745,16 +745,16 @@ class ThermalVideoModel(QObject):
 
             if self.tmp_state_f.is_file():
                 ret = QMessageBox.question(self.main_win, "Recover state",
-                                        "Recover the last aborted state?",
-                                        QMessageBox.Yes | QMessageBox.No,
-                                        )
+                                           "Recover the last aborted state?",
+                                           QMessageBox.Yes | QMessageBox.No,
+                                           )
                 if ret == QMessageBox.Yes:
                     self.load_status(fname=self.tmp_state_f)
             elif last_state_f.is_file():
                 ret = QMessageBox.question(self.main_win, "Load last state",
-                                        "Retrieve the last working state?",
-                                        QMessageBox.Yes | QMessageBox.No,
-                                        )
+                                           "Retrieve the last working state?",
+                                           QMessageBox.Yes | QMessageBox.No,
+                                           )
                 if ret == QMessageBox.Yes:
                     self.load_status(fname=last_state_f)
 
@@ -806,7 +806,7 @@ class ThermalVideoModel(QObject):
             self.main_win.plot_timeline = None
             self.main_win.plot_marker_line = {}
             self.main_win.roi_plot_canvas.setEnabled(False)
-            
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def set_thermal_clim(self, *args, **kwargs):
         if not self.thermalData.loaded:
@@ -1730,10 +1730,10 @@ class ThermalVideoModel(QObject):
             si = 1.0 / self.tracking_point[point].frequency
             if point not in self.main_win.plot_line or \
                     point not in self.main_win.plot_line_lpf:
-                
+
                 if point in self.main_win.plot_line:
                     del self.main_win.plot_line[point]
-                
+
                 if point in self.main_win.plot_line_lpf:
                     del self.main_win.plot_line_lpf[point]
 
@@ -1782,8 +1782,9 @@ class ThermalVideoModel(QObject):
                             len(self.tracking_point[point].value_ts)) * np.nan
                         lpf_ts[np.min(xi0):np.max(xi0)+1] = \
                             self.InterpLPF(y0, xi0, si, self.lpf)
-                        if point in self.main_win.plot_line_lpf: 
-                            self.main_win.plot_line_lpf[point].set_ydata(lpf_ts)
+                        if point in self.main_win.plot_line_lpf:
+                            self.main_win.plot_line_lpf[point
+                                                        ].set_ydata(lpf_ts)
 
         self.main_win.plot_ax.relim()
         self.main_win.plot_ax.autoscale_view()
@@ -1882,10 +1883,10 @@ class ThermalVideoModel(QObject):
         if realod_data is None:
             # Ask if reload the data
             ret = QMessageBox.question(self.main_win,
-                                    "Reload the tempertature values",
-                                    "Reload the tempertature values?",
-                                    QMessageBox.Yes | QMessageBox.No,
-                                    defaultButton=QMessageBox.No)
+                                       "Reload the tempertature values",
+                                       "Reload the tempertature values?",
+                                       QMessageBox.Yes | QMessageBox.No,
+                                       defaultButton=QMessageBox.No)
             if ret == QMessageBox.Yes:
                 realod_data = True
             else:
@@ -1958,7 +1959,6 @@ class ThermalVideoModel(QObject):
             return
 
         if call == 'boot_dlc_gui':
-            cmd = "python -m deeplabcut"
             self.dlci.boot_dlc_gui()
 
         elif call == 'new_project':
@@ -1983,8 +1983,9 @@ class ThermalVideoModel(QObject):
             self.dlci.config_path = conf_file
 
         elif call == 'edit_config':
-            self.dlci.edit_config(self.main_win.ui_edit_config,
-                default_values={'bodyparts': ['LEYE','REYE']})
+            self.dlci.edit_config(
+                self.main_win.ui_edit_config,
+                default_values={'bodyparts': ['LEYE', 'REYE']})
 
         elif call == 'extract_frames':
             # Wait message box
@@ -2055,10 +2056,10 @@ class ThermalVideoModel(QObject):
                 # Delte result files
                 for ff in res_fs:
                     ff.unlink()
-            
+
             config_data = self.dlci.get_config()
             if config_data['snapshotindex'] == -1:
-                 self.dlci.edit_config(edit_keys=['snapshotindex',])
+                self.dlci.edit_config(edit_keys=['snapshotindex'])
 
             self.dlci.analyze_videos(self.videoData.filename)
 
@@ -2140,10 +2141,13 @@ class ThermalVideoModel(QObject):
 
         if 'likelihood' in track_df[PointNames[0]].columns:
             if lh_thresh is None:
+                max_lh = track_df[PointNames[0]].likelihood.max()
                 lh_thresh, ok = QInputDialog.getDouble(
                     self.main_win, 'Likelihood',
-                    'Likelihood threshold:', value=0.95, min=0.0, max=1.0,
-                    decimals=2)
+                    'Likelihood threshold:',
+                    value=min(0.95, max_lh),
+                    minValue=0.0,
+                    maxValue=max_lh, decimals=2)
                 if not ok:
                     return
 
@@ -2277,7 +2281,7 @@ class ThermalVideoModel(QObject):
             fname = Path(fname)
             if fname.suffix != '.pkl':
                 fname = Path(str(fname) + '.pkl')
-            
+
             self.loaded_state_f = fname
         else:
             if not fname.parent.is_dir():
@@ -2287,7 +2291,8 @@ class ThermalVideoModel(QObject):
         # --- Extract saving parameter values for the model object ---
         settings = {}
         saving_params = ['on_sync', 'time_marker', 'thermalData', 'videoData',
-                         'tracking_point', 'tracking_mark', 'dlci', 'lpf', 'DATA_ROOT']
+                         'tracking_point', 'tracking_mark', 'dlci', 'lpf',
+                         'DATA_ROOT']
         for param in saving_params:
             if not hasattr(self, param):
                 continue
@@ -2404,7 +2409,7 @@ class ThermalVideoModel(QObject):
                 fname = self.thermalData.filename
                 if isinstance(fname, Path):
                     self.DATA_ROOT = self.thermalData.filename.parent
-            
+
             if isinstance(fname, Path) and fname.is_file():
                 self.openThermalFile(fileName=fname)
                 frame_position = settings['thermalData']['frame_position']
@@ -2532,14 +2537,14 @@ class ThermalVideoModel(QObject):
         for param, obj in settings.items():
             if hasattr(self, param):
                 setattr(self, param, obj)
-        
+
         gc.collect()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def save_tmp_status(self):
         self.save_status(fname=self.tmp_state_f)
         self.save_timer.start(self.save_tmp_wait * 1000)
-    
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def set_data_root(self, data_dir=None):
         if data_dir is None:
@@ -2573,7 +2578,8 @@ class MainWindow(QMainWindow):
         self.init_ui_objects()
 
         # Init the model class
-        self.model = ThermalVideoModel(main_win=self, batchmode=batchmode,
+        self.model = ThermalVideoModel(
+            main_win=self, batchmode=batchmode,
             extract_temp_file=extract_temp_file)
 
         # Connect signals
@@ -3128,12 +3134,6 @@ class MainWindow(QMainWindow):
         # -- DLC menu --
         dlcMenu = menuBar.addMenu('&DLC')
 
-        # -- Boot deeplabcut GUI ---
-        action = QAction('deeplabcut GUI', self)
-        action.setStatusTip('Boot deeplabcut GUI application')
-        action.triggered.connect(partial(self.model.dlc_call, 'boot_dlc_gui'))
-        dlcMenu.addAction(action)
-
         # -- I --
         action = QAction('New project', self)
         action.setStatusTip('Create a new DeepLabCut project')
@@ -3146,45 +3146,47 @@ class MainWindow(QMainWindow):
         dlcMenu.addAction(action)
 
         # -- II --
-        action = QAction('Edit configuration', self)
-        action.setStatusTip('Edit DeepLabCut configuration')
-        action.triggered.connect(partial(self.model.dlc_call, 'edit_config'))
-        dlcMenu.addAction(action)
+        # action = QAction('Edit configuration', self)
+        # action.setStatusTip('Edit DeepLabCut configuration')
+        # action.triggered.connect(partial(self.model.dlc_call, 'edit_config'))
+        # dlcMenu.addAction(action)
 
-        # -- III --
-        action = QAction('Extract training frames', self)
-        action.setStatusTip('Extract frames for DeepLabCut training')
-        action.triggered.connect(partial(self.model.dlc_call,
-                                         'extract_frames'))
-        dlcMenu.addAction(action)
+        # # -- III --
+        # action = QAction('Extract training frames', self)
+        # action.setStatusTip('Extract frames for DeepLabCut training')
+        # action.triggered.connect(partial(self.model.dlc_call,
+        #                                  'extract_frames'))
+        # dlcMenu.addAction(action)
 
-        # -- IV --
-        action = QAction('Label frames', self)
-        action.setStatusTip('Label frames for DeepLabCut training')
-        action.triggered.connect(partial(self.model.dlc_call, 'label_frames'))
-        dlcMenu.addAction(action)
+        # # -- IV --
+        # action = QAction('Label frames', self)
+        # action.setStatusTip('Label frames for DeepLabCut training')
+        # action.triggered.connect(partial(self.model.dlc_call,
+        # 'label_frames'))
+        # dlcMenu.addAction(action)
 
-        # -- V --
-        action = QAction('Check labels', self)
-        action.setStatusTip('Check labels for DeepLabCut training')
-        action.triggered.connect(partial(self.model.dlc_call, 'check_labels'))
-        dlcMenu.addAction(action)
+        # # -- V --
+        # action = QAction('Check labels', self)
+        # action.setStatusTip('Check labels for DeepLabCut training')
+        # action.triggered.connect(partial(self.model.dlc_call,
+        # 'check_labels'))
+        # dlcMenu.addAction(action)
 
-        # -- VI, VII --
-        action = QAction('Train network', self)
-        action.setStatusTip('Create training dataset and '
-                            'train DeepLabCut training')
-        action.setStatusTip('Train DeepLabCut network')
-        action.triggered.connect(partial(self.model.dlc_call,
-                                         'train_network', 'run_subprocess'))
-        dlcMenu.addAction(action)
+        # # -- VI, VII --
+        # action = QAction('Train network', self)
+        # action.setStatusTip('Create training dataset and '
+        #                     'train DeepLabCut training')
+        # action.setStatusTip('Train DeepLabCut network')
+        # action.triggered.connect(partial(self.model.dlc_call,
+        #                                  'train_network', 'run_subprocess'))
+        # dlcMenu.addAction(action)
 
-        action = QAction('- Make a training script', self)
-        action.setStatusTip(
-            'Make a command script for DeepLabCut network training')
-        action.triggered.connect(partial(self.model.dlc_call,
-                                         'train_network', 'prepare_script'))
-        dlcMenu.addAction(action)
+        # action = QAction('- Make a training script', self)
+        # action.setStatusTip(
+        #     'Make a command script for DeepLabCut network training')
+        # action.triggered.connect(partial(self.model.dlc_call,
+        #                                  'train_network', 'prepare_script'))
+        # dlcMenu.addAction(action)
 
         """
         # -- VIII --
@@ -3196,17 +3198,17 @@ class MainWindow(QMainWindow):
         """
 
         # -- IX --
-        action = QAction('- Analyze video', self)
-        action.setStatusTip('Analyze video by DeepLabCut')
-        action.triggered.connect(partial(self.model.dlc_call,
-                                         'analyze_videos'))
-        dlcMenu.addAction(action)
+        # action = QAction('- Analyze video', self)
+        # action.setStatusTip('Analyze video by DeepLabCut')
+        # action.triggered.connect(partial(self.model.dlc_call,
+        #                                  'analyze_videos'))
+        # dlcMenu.addAction(action)
 
-        action = QAction('- Filter prediction', self)
-        action.setStatusTip('Filter prediction by DeepLabCut')
-        action.triggered.connect(
-                partial(self.model.dlc_call, 'filterpredictions'))
-        dlcMenu.addAction(action)
+        # action = QAction('- Filter prediction', self)
+        # action.setStatusTip('Filter prediction by DeepLabCut')
+        # action.triggered.connect(
+        #         partial(self.model.dlc_call, 'filterpredictions'))
+        # dlcMenu.addAction(action)
 
         """
         action = QAction('- Plot trajectories', self)
@@ -3222,35 +3224,42 @@ class MainWindow(QMainWindow):
         dlcMenu.addAction(action)
         """
 
-        action = QAction('- Create labeled video', self)
-        action.setStatusTip('Create labeled video by DeepLabCut')
-        action.triggered.connect(
-                partial(self.model.dlc_call, 'create_labeled_video', False))
-        dlcMenu.addAction(action)
+        # action = QAction('- Create labeled video', self)
+        # action.setStatusTip('Create labeled video by DeepLabCut')
+        # action.triggered.connect(
+        #         partial(self.model.dlc_call, 'create_labeled_video', False))
+        # dlcMenu.addAction(action)
 
-        action = QAction('- Create labeled video (filtered)', self)
-        action.setStatusTip(
-                'Create labeled video with SARIMAX filtering by DeepLabCut')
-        action.triggered.connect(
-                partial(self.model.dlc_call, 'create_labeled_video', True))
-        dlcMenu.addAction(action)
+        # action = QAction('- Create labeled video (filtered)', self)
+        # action.setStatusTip(
+        #         'Create labeled video with SARIMAX filtering by DeepLabCut')
+        # action.triggered.connect(
+        #         partial(self.model.dlc_call, 'create_labeled_video', True))
+        # dlcMenu.addAction(action)
 
-        # -- X --
-        action = QAction('Extract outlier frames', self)
-        action.setStatusTip('Extract outlier frames by DeepLabCut')
-        action.triggered.connect(partial(self.model.dlc_call,
-                                         'extract_outlier_frames'))
-        dlcMenu.addAction(action)
+        # # -- X --
+        # action = QAction('Extract outlier frames', self)
+        # action.setStatusTip('Extract outlier frames by DeepLabCut')
+        # action.triggered.connect(partial(self.model.dlc_call,
+        #                                  'extract_outlier_frames'))
+        # dlcMenu.addAction(action)
 
-        action = QAction('- Refine labels', self)
-        action.setStatusTip('Refine labels by DeepLabCut')
-        action.triggered.connect(partial(self.model.dlc_call, 'refine_labels'))
-        dlcMenu.addAction(action)
+        # action = QAction('- Refine labels', self)
+        # action.setStatusTip('Refine labels by DeepLabCut')
+        # action.triggered.connect(partial(self.model.dlc_call,
+        # 'refine_labels'))
+        # dlcMenu.addAction(action)
 
-        action = QAction('- Merge datasets', self)
-        action.setStatusTip('Merge datasets by DeepLabCut')
-        action.triggered.connect(partial(self.model.dlc_call,
-                                         'merge_datasets'))
+        # action = QAction('- Merge datasets', self)
+        # action.setStatusTip('Merge datasets by DeepLabCut')
+        # action.triggered.connect(partial(self.model.dlc_call,
+        #                                  'merge_datasets'))
+        # dlcMenu.addAction(action)
+
+        # -- Boot deeplabcut GUI ---
+        action = QAction('deeplabcut GUI', self)
+        action.setStatusTip('Boot deeplabcut GUI application')
+        action.triggered.connect(partial(self.model.dlc_call, 'boot_dlc_gui'))
         dlcMenu.addAction(action)
 
         # -- XI --
@@ -3420,18 +3429,18 @@ class MainWindow(QMainWindow):
             else:
                 data_dir = self.model.videoData.filename.parent
             shutil.copy(fname, data_dir / fname.name)
-        
+
         if self.model.tmp_state_f.is_file():
             self.model.tmp_state_f.unlink()
 
         if self.model.CONF_DIR.is_dir():
             for rmf in self.model.CONF_DIR.glob('*.fff'):
                 rmf.unlink()
-            
+
             conf = {'DATA_ROOT': str(self.model.DATA_ROOT)}
             with open(self.model.conf_f, 'w') as fd:
                 json.dump(conf, fd)
-        
+
         self.deleteLater()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -3439,6 +3448,7 @@ class MainWindow(QMainWindow):
         """For debug
         """
         print(self.width(), self.height())
+
 
 # %%
 def excepthook(exc_type, exc_value, exc_tb):

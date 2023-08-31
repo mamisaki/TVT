@@ -28,8 +28,8 @@ import pickle
 from contextlib import redirect_stdout
 import traceback
 import unicodedata
-import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
+# import warnings
+# warnings.simplefilter(action='ignore', category=FutureWarning)
 
 import numpy as np
 import deeplabcut as dlc
@@ -40,7 +40,8 @@ import yaml
 # %%
 def slugify(value, allow_unicode=True):
     """
-    Taken from https://github.com/django/django/blob/master/django/utils/text.py
+    Taken from
+    https://github.com/django/django/blob/master/django/utils/text.py
     Convert to ASCII if 'allow_unicode' is False. Convert spaces or repeated
     dashes to single dashes. Remove characters that aren't alphanumerics,
     underscores, or hyphens. Convert to lowercase. Also strip leading and
@@ -50,7 +51,8 @@ def slugify(value, allow_unicode=True):
     if allow_unicode:
         value = unicodedata.normalize('NFKC', value)
     else:
-        value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
+        value = unicodedata.normalize('NFKD', value)
+        value = value.encode('ascii', 'ignore').decode('ascii')
     value = re.sub(r'[^\w\s-]', '', value.lower())
     return re.sub(r'[-\s]+', '-', value).strip('-_')
 
@@ -308,16 +310,16 @@ class DLCinter():
         return config_data
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def edit_config(self, edit_gui_fn=None, edit_keys=None, default_values=None,
-                    gui_title='Edit DLC configuration'):
+    def edit_config(self, edit_gui_fn=None, edit_keys=None,
+                    default_values=None, gui_title='Edit DLC configuration'):
         if not self.check_config_file():
             return
 
         # Set editing keys
         if edit_keys is None:
-            edit_keys =['Task', 'bodyparts', 'corner2move2', 'date',
-                        'default_net_type', 'iteration', 'move2corner',
-                        'start', 'stop', 'x1', 'x2', 'y1', 'y2']
+            edit_keys = ['Task', 'bodyparts', 'corner2move2', 'date',
+                         'default_net_type', 'iteration', 'move2corner',
+                         'start', 'stop', 'x1', 'x2', 'y1', 'y2']
 
         # Read config file
         config_data = self.get_config()
@@ -336,7 +338,8 @@ class DLCinter():
         # Edit config
         if edit_gui_fn is not None:
             try:
-                editing_config_data = edit_gui_fn(editing_config_data, gui_title)
+                editing_config_data = edit_gui_fn(editing_config_data,
+                                                  gui_title)
             except Exception:
                 print(traceback.format_exc())
                 editing_config_data = None
@@ -638,7 +641,8 @@ class DLCinter():
                          for fn in (modelfolder / 'train').glob('*.index')]
             if len(Snapshots):
                 snapshotindex = np.max(Snapshots)
-                self.edit_config(edit_keys=['snapshotindex',],
+                self.edit_config(
+                    edit_keys=['snapshotindex'],
                     default_values={'snapshotindex': int(snapshotindex)})
             else:
                 return []

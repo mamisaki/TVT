@@ -2,7 +2,7 @@
 
 # anaconda environment setup
 . $HOME/anaconda3/etc/profile.d/conda.sh
-conda activate DEEPLABCUT
+conda activate TVT
 
 cd $HOME/TVT/code
 python TVT.py
