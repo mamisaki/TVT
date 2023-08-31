@@ -4,3 +4,8 @@
 config/*
 launch.json
 code/__pycache__/*
+.idea
+config*
+data*
+stat*
+.DS_Store
