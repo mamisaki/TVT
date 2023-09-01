@@ -113,9 +113,6 @@ if __name__ == '__main__':
         config_f = set_config(config_f, APP_ROOT, HOSTNAME)
 
     config_f = str(Path(config_f).absolute())
-    config_f = re.sub(r'\s', r'\ ', config_f)
-    config_f = re.sub(r'\(', r'\(', config_f)
-    config_f = re.sub(r'\)', r'\)', config_f)
 
     # --- Run -----------------------------------------------------------------
     print('+' * 70)

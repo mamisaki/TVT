@@ -583,7 +583,7 @@ class DLCinter():
             self.show_err_msg(f'Not found {cmd_path}.')
         cmd_path = os.path.relpath(cmd_path, work_dir)
         script_f = work_dir / 'DLC_training.sh'
-        cmd = f'python {cmd_path} --config {conf_path} --create_training_dset'
+        cmd = f'python {cmd_path} --config {conf_path}'
         cmd += " --evaluate_network"
         if len(analyze_videos):
             video_path = [str(Path(os.path.relpath(pp.resolve(), work_dir)))
@@ -614,7 +614,7 @@ class DLCinter():
             msg += "Run the script in a console"
             msg += " by copy and paste the following lines;\n"
             msg += " (modify the path if necessary)\n\n"
-            msg += "conda activate DLC-GPU\n"
+            msg += "conda activate TVT\n"
             msg += f"cd {work_dir}\n"
             msg += f"nohup {run_cmd} > {log_f.relative_to(work_dir)} &"
             self.show_msg(msg)
