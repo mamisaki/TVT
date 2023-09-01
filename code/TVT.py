@@ -3140,7 +3140,7 @@ class MainWindow(QMainWindow):
         action.triggered.connect(partial(self.model.dlc_call, 'new_project'))
         dlcMenu.addAction(action)
 
-        action = QAction('- Load config', self)
+        action = QAction('Load config', self)
         action.setStatusTip('Load existing DeepLabCut configuraton')
         action.triggered.connect(partial(self.model.dlc_call, 'load_config'))
         dlcMenu.addAction(action)
@@ -3179,13 +3179,6 @@ class MainWindow(QMainWindow):
         # action.setStatusTip('Train DeepLabCut network')
         # action.triggered.connect(partial(self.model.dlc_call,
         #                                  'train_network', 'run_subprocess'))
-        # dlcMenu.addAction(action)
-
-        # action = QAction('- Make a training script', self)
-        # action.setStatusTip(
-        #     'Make a command script for DeepLabCut network training')
-        # action.triggered.connect(partial(self.model.dlc_call,
-        #                                  'train_network', 'prepare_script'))
         # dlcMenu.addAction(action)
 
         """
@@ -3262,6 +3255,13 @@ class MainWindow(QMainWindow):
         action.triggered.connect(partial(self.model.dlc_call, 'boot_dlc_gui'))
         dlcMenu.addAction(action)
 
+        action = QAction('Make a training script', self)
+        action.setStatusTip(
+            'Make a command script for DeepLabCut network training')
+        action.triggered.connect(partial(self.model.dlc_call,
+                                         'train_network', 'prepare_script'))
+        dlcMenu.addAction(action)
+        
         # -- XI --
         action = QAction('Load tracking positions', self)
         action.setStatusTip('Load positions tracked by DeepLabCut')

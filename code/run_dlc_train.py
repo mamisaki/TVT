@@ -7,6 +7,7 @@
 
 # %% import ===================================================================
 import os
+import re
 os.environ['MPLBACKEND'] = 'TKAgg'
 
 import deeplabcut as dlc
@@ -111,14 +112,17 @@ if __name__ == '__main__':
     if not config_f.stem.endswith(HOSTNAME):
         config_f = set_config(config_f, APP_ROOT, HOSTNAME)
 
-    config_f = Path(config_f).absolute()
+    config_f = str(Path(config_f).absolute())
+    config_f = re.sub(r'\s', r'\ ', config_f)
+    config_f = re.sub(r'\(', r'\(', config_f)
+    config_f = re.sub(r'\)', r'\)', config_f)
 
     # --- Run -----------------------------------------------------------------
     print('+' * 70)
     print(f"Run dlc.train_network for config {config_f}\n")
 
     if create_training_dset:
-        dlc.create_training_dataset(config_f)
+        dlc.create_training_dataset(str(config_f))
 
     dlc.train_network(config_f, shuffle=shuffle,
                       trainingsetindex=trainingsetindex, gputouse=gputouse,
