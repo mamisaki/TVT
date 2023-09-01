@@ -1984,8 +1984,8 @@ class ThermalVideoModel(QObject):
 
         elif call == 'edit_config':
             self.dlci.edit_config(
-                self.main_win.ui_edit_config,
-                default_values={'bodyparts': ['LEYE', 'REYE']})
+                self.main_win.ui_edit_config)
+                # default_values={'bodyparts': ['LEYE', 'REYE']})
 
         elif call == 'extract_frames':
             # Wait message box
@@ -3140,16 +3140,16 @@ class MainWindow(QMainWindow):
         action.triggered.connect(partial(self.model.dlc_call, 'new_project'))
         dlcMenu.addAction(action)
 
-        action = QAction('Load config', self)
+        action = QAction('- Load config', self)
         action.setStatusTip('Load existing DeepLabCut configuraton')
         action.triggered.connect(partial(self.model.dlc_call, 'load_config'))
         dlcMenu.addAction(action)
 
         # -- II --
-        # action = QAction('Edit configuration', self)
-        # action.setStatusTip('Edit DeepLabCut configuration')
-        # action.triggered.connect(partial(self.model.dlc_call, 'edit_config'))
-        # dlcMenu.addAction(action)
+        action = QAction('Edit configuration', self)
+        action.setStatusTip('Edit DeepLabCut configuration')
+        action.triggered.connect(partial(self.model.dlc_call, 'edit_config'))
+        dlcMenu.addAction(action)
 
         # # -- III --
         # action = QAction('Extract training frames', self)
