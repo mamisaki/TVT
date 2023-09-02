@@ -3464,7 +3464,7 @@ if __name__ == '__main__':
     win = MainWindow()
 
     # --- Set initial window size ---
-    win.resize(1440, 840)
+    win.resize(1440, 920)
     win.move(0, 0)
     win.show()
     ret = app.exec()
