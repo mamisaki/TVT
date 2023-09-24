@@ -1728,9 +1728,9 @@ class ThermalVideoModel(QObject):
             else:
                 ls = '-'
 
-            si = 1.0 / self.tracking_point[point].frequency
+            # si = 1.0 / self.tracking_point[point].frequency
             if point not in self.main_win.plot_line:  # or \
-                    # point not in self.main_win.plot_line_lpf:
+                # point not in self.main_win.plot_line_lpf:
 
                 if point in self.main_win.plot_line:
                     del self.main_win.plot_line[point]
@@ -1773,14 +1773,15 @@ class ThermalVideoModel(QObject):
                     self.main_win.plot_line[point].set_ydata(
                         self.tracking_point[point].value_ts.copy())
 
-                    xi0 = np.argwhere(
-                        np.logical_not(
-                            np.isnan(self.tracking_point[point].value_ts))
-                        ).ravel()
+                    # xi0 = np.argwhere(
+                    #     np.logical_not(
+                    #         np.isnan(self.tracking_point[point].value_ts))
+                    #     ).ravel()
                     # if len(xi0) > 100:
                     #     y0 = self.tracking_point[point].value_ts[xi0]
                     #     lpf_ts = np.ones(
-                    #         len(self.tracking_point[point].value_ts)) * np.nan
+                    #         len(self.tracking_point[point].value_ts)
+                    #         ) * np.nan
                     #     lpf_ts[np.min(xi0):np.max(xi0)+1] = \
                     #         self.InterpLPF(y0, xi0, si, self.lpf)
                     #     if point in self.main_win.plot_line_lpf:
@@ -1986,7 +1987,7 @@ class ThermalVideoModel(QObject):
         elif call == 'edit_config':
             self.dlci.edit_config(
                 self.main_win.ui_edit_config)
-                # default_values={'bodyparts': ['LEYE', 'REYE']})
+            # default_values={'bodyparts': ['LEYE', 'REYE']})
 
         elif call == 'extract_frames':
             # Wait message box
@@ -3262,7 +3263,7 @@ class MainWindow(QMainWindow):
         action.triggered.connect(partial(self.model.dlc_call,
                                          'train_network', 'prepare_script'))
         dlcMenu.addAction(action)
-        
+
         # -- XI --
         action = QAction('Load tracking positions', self)
         action.setStatusTip('Load positions tracked by DeepLabCut')

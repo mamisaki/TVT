@@ -576,12 +576,13 @@ class DLCinter():
         self.set_config(self._config_work_path)
         conf_path = Path(self._config_path).name
 
-        cmd_path = Path(__file__).parent / 'run_dlc_train.py'
+        cmd_path = Path.home() / 'TVT' / 'code' / 'run_dlc_train.py'
         log_f = work_dir / 'DLC_train.out'
 
         if not cmd_path.is_file():
             self.show_err_msg(f'Not found {cmd_path}.')
-        cmd_path = os.path.relpath(cmd_path, work_dir)
+            return
+        # cmd_path = os.path.relpath(cmd_path, work_dir)
         script_f = work_dir / 'DLC_training.sh'
         cmd = f'python {cmd_path} --config {conf_path}'
         cmd += " --evaluate_network"

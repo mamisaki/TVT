@@ -30,7 +30,6 @@ Create deeplabcut environment
 
 
 # %% import -------------------------------------------------------------------
-import os
 from pathlib import Path, PurePath
 import sys
 from datetime import timedelta
@@ -41,6 +40,7 @@ import re
 import shutil
 import time
 import json
+import traceback
 
 import numpy as np
 import pandas as pd
@@ -277,7 +277,8 @@ class DLC_GUI(QObject):
 
         # View model
         self.main_win = main_win
-        self.tracking_point_pen_color_default = tracking_point_pen_color_default
+        self.tracking_point_pen_color_default = \
+            tracking_point_pen_color_default
         self.DATA_ROOT = APP_ROOT / 'data'
 
         # --- Video data ------------------------------------------------------
@@ -302,7 +303,7 @@ class DLC_GUI(QObject):
             try:
                 with open(self.conf_f, 'r') as fd:
                     conf = json.load(fd)
-                
+
                 for k, v in conf.items():
                     if k in ('DATA_ROOT',):
                         v = Path(v)
@@ -345,7 +346,7 @@ class DLC_GUI(QObject):
         last_state_f = APP_ROOT / 'config' / 'DLCGUI_last_working_state-0.pkl'
         if not last_state_f.parent.is_dir():
             last_state_f.parent.mkdir()
-        
+
         if not batchmode:
             self.save_timer = QTimer()
             self.save_timer.setSingleShot(True)
@@ -355,16 +356,14 @@ class DLC_GUI(QObject):
 
             if self.tmp_state_f.is_file():
                 ret = QMessageBox.question(self.main_win, "Recover state",
-                                        "Recover the last aborted state?",
-                                        QMessageBox.Yes | QMessageBox.No,
-                                        )
+                                           "Recover the last aborted state?",
+                                           QMessageBox.Yes | QMessageBox.No)
                 if ret == QMessageBox.Yes:
                     self.load_status(fname=self.tmp_state_f)
             elif last_state_f.is_file():
                 ret = QMessageBox.question(self.main_win, "Load last state",
-                                        "Retrieve the last working state?",
-                                        QMessageBox.Yes | QMessageBox.No,
-                                        )
+                                           "Retrieve the last working state?",
+                                           QMessageBox.Yes | QMessageBox.No)
                 if ret == QMessageBox.Yes:
                     self.load_status(fname=last_state_f)
 
@@ -596,7 +595,7 @@ class DLC_GUI(QObject):
                     self.tracking_point[point_name].radius
                 self.tracking_mark[point_name]['pen_color'] = \
                     self.tracking_point_pen_color_default
-                pcols =  list(pen_color_rgb.keys())
+                pcols = list(pen_color_rgb.keys())
                 cidx = pcols.index(self.tracking_point_pen_color_default)
                 cidx = (cidx+1) % len(pcols)
                 self.tracking_point_pen_color_default = pcols[cidx]
@@ -615,11 +614,11 @@ class DLC_GUI(QObject):
         self.main_win.roi_idx_cmbbx.clear()
         if len(self.tracking_mark) == 0:
             self.main_win.roi_ctrl_grpbx.setEnabled(False)
-            #self.main_win.roi_export_btn.setEnabled(False)
+            # self.main_win.roi_export_btn.setEnabled(False)
             self.main_win.roi_plot_canvas.setEnabled(False)
         else:
             self.main_win.roi_ctrl_grpbx.setEnabled(True)
-            #self.main_win.roi_export_btn.setEnabled(True)
+            # self.main_win.roi_export_btn.setEnabled(True)
             self.main_win.roi_plot_canvas.setEnabled(True)
 
             self.main_win.roi_idx_cmbbx.blockSignals(True)
@@ -1265,6 +1264,9 @@ class DLC_GUI(QObject):
         elif call == 'merge_datasets':
             self.dlci.merge_datasets()
 
+        elif call == 'boot_dlc_gui':
+            self.dlci.boot_dlc_gui()
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def load_tracking(self, fileName=None, lh_thresh=None, **kwargs):
         if not self.videoData.loaded:
@@ -1308,7 +1310,8 @@ class DLC_GUI(QObject):
             if lh_thresh is None:
                 lh_thresh, ok = QInputDialog.getDouble(
                     self.main_win, 'Likelihood',
-                    'Likelihood threshold:', value=0.9, min=0.0, max=1.0,
+                    'Likelihood threshold:', value=0.9,
+                    minValue=0.0, maxValue=1.0,
                     decimals=2)
                 if not ok:
                     return
@@ -1316,7 +1319,7 @@ class DLC_GUI(QObject):
         # --- Read data and set tracking_points -------------------------------
         currentFrm = self.videoData.frame_position
         for point in PointNames:
-            frm_mask = np.ones(len(track_df), dtype=np.bool)
+            frm_mask = np.ones(len(track_df), dtype=bool)
             if 'likelihood' in track_df[point].columns:
                 lh = track_df[point].likelihood.values
                 frm_mask &= (lh >= lh_thresh)
@@ -1394,7 +1397,7 @@ class DLC_GUI(QObject):
             fname = Path(fname)
             if fname.suffix != '.pkl':
                 fname = Path(str(fname) + '.pkl')
-            
+
             self.loaded_state_f = fname
         else:
             if not fname.parent.is_dir():
@@ -1494,7 +1497,8 @@ class DLC_GUI(QObject):
             settings = pickle.load(fd)
 
         if fname != self.tmp_state_f and \
-                fname != APP_ROOT / 'config' / 'DLCGUI_last_working_state-0.pkl':
+                fname != APP_ROOT / 'config' / \
+                'DLCGUI_last_working_state-0.pkl':
             self.loaded_state_f = Path(fname)
 
         # Load DATA_ROOT
@@ -1529,7 +1533,8 @@ class DLC_GUI(QObject):
 
         # Load DLC config
         if 'dlci' in settings:
-            self.dlci.config_path = self.DATA_ROOT / settings['dlci']['_config_path']
+            self.dlci.config_path = self.DATA_ROOT / \
+                settings['dlci']['_config_path']
             del settings['dlci']
 
         # Load tracking_point
@@ -1800,7 +1805,8 @@ class ViewWindow(QMainWindow):
         self.roi_delete_btn.clicked.connect(
                 lambda: self.model.delete_point(point_name=None,
                                                 ask_confirm=True))
-        self.roi_load_btn.clicked.connect(partial(self.model.load_tracking, fileName=None))
+        self.roi_load_btn.clicked.connect(partial(self.model.load_tracking,
+                                                  fileName=None))
         self.roi_export_btn.clicked.connect(self.model.export_roi_data)
 
         # Time-course plot
@@ -1970,12 +1976,6 @@ class ViewWindow(QMainWindow):
         # -- DLC menu --
         dlcMenu = menuBar.addMenu('&DLC')
 
-        # -- Boot deeplabcut GUI ---
-        action = QAction('deeplabcut GUI', self)
-        action.setStatusTip('Boot deeplabcut GUI application')
-        action.triggered.connect(partial(self.model.dlc_call, 'boot_dlc_gui'))
-        dlcMenu.addAction(action)
-
         # -- I --
         action = QAction('New project', self)
         action.setStatusTip('Create a new DeepLabCut project')
@@ -1993,106 +1993,17 @@ class ViewWindow(QMainWindow):
         action.triggered.connect(partial(self.model.dlc_call, 'edit_config'))
         dlcMenu.addAction(action)
 
-        # -- III --
-        action = QAction('Extract training frames', self)
-        action.setStatusTip('Extract frames for DeepLabCut training')
-        action.triggered.connect(partial(self.model.dlc_call,
-                                         'extract_frames'))
+        # -- Boot deeplabcut GUI ---
+        action = QAction('deeplabcut GUI', self)
+        action.setStatusTip('Boot deeplabcut GUI application')
+        action.triggered.connect(partial(self.model.dlc_call, 'boot_dlc_gui'))
         dlcMenu.addAction(action)
 
-        # -- IV --
-        action = QAction('Label frames', self)
-        action.setStatusTip('Label frames for DeepLabCut training')
-        action.triggered.connect(partial(self.model.dlc_call, 'label_frames'))
-        dlcMenu.addAction(action)
-
-        # -- V --
-        action = QAction('Check labels', self)
-        action.setStatusTip('Check labels for DeepLabCut training')
-        action.triggered.connect(partial(self.model.dlc_call, 'check_labels'))
-        dlcMenu.addAction(action)
-
-        # -- VI, VII --
-        action = QAction('Train network', self)
-        action.setStatusTip('Create training dataset and '
-                            'train DeepLabCut training')
-        action.setStatusTip('Train DeepLabCut network')
-        action.triggered.connect(partial(self.model.dlc_call,
-                                         'train_network', 'run_subprocess'))
-        dlcMenu.addAction(action)
-
-        action = QAction('- Make a training script', self)
+        action = QAction('Make a training script', self)
         action.setStatusTip(
             'Make a command script for DeepLabCut network training')
         action.triggered.connect(partial(self.model.dlc_call,
                                          'train_network', 'prepare_script'))
-        dlcMenu.addAction(action)
-
-        """
-        # -- VIII --
-        action = QAction('VIII. Evaluate network', self)
-        action.setStatusTip('Evaluate network of DeepLabCut')
-        action.triggered.connect(partial(self.model.dlc_call,
-                                         'evaluate_network'))
-        dlcMenu.addAction(action)
-        """
-
-        # -- IX --
-        action = QAction('- Analyze video', self)
-        action.setStatusTip('Analyze video by DeepLabCut')
-        action.triggered.connect(partial(self.model.dlc_call,
-                                         'analyze_videos'))
-        dlcMenu.addAction(action)
-
-        action = QAction('- Filter prediction', self)
-        action.setStatusTip('Filter prediction by DeepLabCut')
-        action.triggered.connect(
-                partial(self.model.dlc_call, 'filterpredictions'))
-        dlcMenu.addAction(action)
-
-        """
-        action = QAction('- Plot trajectories', self)
-        action.setStatusTip('Plot trajectories by DeepLabCut')
-        action.triggered.connect(
-                partial(self.model.dlc_call, 'plot_trajectories', False))
-        dlcMenu.addAction(action)
-
-        action = QAction('- Plot filtered trajectories', self)
-        action.setStatusTip('Plot flitered trajectories by DeepLabCut')
-        action.triggered.connect(
-                partial(self.model.dlc_call, 'plot_trajectories', True))
-        dlcMenu.addAction(action)
-        """
-
-        action = QAction('- Create labeled video', self)
-        action.setStatusTip('Create labeled video by DeepLabCut')
-        action.triggered.connect(
-                partial(self.model.dlc_call, 'create_labeled_video', False))
-        dlcMenu.addAction(action)
-
-        action = QAction('- Create labeled video (filtered)', self)
-        action.setStatusTip(
-                'Create labeled video with SARIMAX filtering by DeepLabCut')
-        action.triggered.connect(
-                partial(self.model.dlc_call, 'create_labeled_video', True))
-        dlcMenu.addAction(action)
-
-        # -- X --
-        action = QAction('Extract outlier frames', self)
-        action.setStatusTip('Extract outlier frames by DeepLabCut')
-        action.triggered.connect(partial(self.model.dlc_call,
-                                         'extract_outlier_frames'))
-        dlcMenu.addAction(action)
-
-        action = QAction('- Refine labels', self)
-        action.setStatusTip('Refine labels by DeepLabCut')
-        action.triggered.connect(partial(self.model.dlc_call, 'refine_labels'))
-        dlcMenu.addAction(action)
-
-        action = QAction('- Merge datasets', self)
-        action.setStatusTip('Merge datasets by DeepLabCut')
-        action.triggered.connect(partial(self.model.dlc_call,
-                                         'merge_datasets'))
         dlcMenu.addAction(action)
 
         # -- XI --
@@ -2253,11 +2164,11 @@ class ViewWindow(QMainWindow):
         if self.model.CONF_DIR.is_dir():
             for rmf in self.model.CONF_DIR.glob('*.fff'):
                 rmf.unlink()
-            
+
             conf = {'DATA_ROOT': str(self.model.DATA_ROOT)}
             with open(self.model.conf_f, 'w') as fd:
                 json.dump(conf, fd)
-        
+
         self.deleteLater()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -2265,6 +2176,7 @@ class ViewWindow(QMainWindow):
         """For debug
         """
         print(self.width(), self.height())
+
 
 # %%
 def excepthook(exc_type, exc_value, exc_tb):
@@ -2278,7 +2190,7 @@ if __name__ == '__main__':
     sys.excepthook = excepthook
     app = QApplication(sys.argv)
     win = ViewWindow()
-    
+
     win.resize(890, 830)
     win.move(0, 0)
     win.show()
