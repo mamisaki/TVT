@@ -67,7 +67,7 @@ from csq_reader import CSQ_READER
 
 # %% Default values ===========================================================
 tracking_point_radius_default = 6
-tracking_point_pen_color_default = 'blue'
+tracking_point_pen_color_default = 'darkRed'
 Aggfuncs = ['mean', 'median', 'min', 'max']
 tracking_point_aggfunc_default = 'mean'
 
@@ -2920,7 +2920,8 @@ class MainWindow(QMainWindow):
 
         self.roi_load_btn.clicked.connect(
             partial(self.model.load_tracking, fileName=None))
-        self.roi_export_btn.clicked.connect(self.model.export_roi_data)
+        self.roi_export_btn.clicked.connect(
+            lambda state: self.model.export_roi_data())
 
         # Time-course plot
         self.roi_plot_canvas.mpl_connect('button_press_event',
