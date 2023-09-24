@@ -70,16 +70,11 @@ tracking_point_radius_default = 2
 tracking_point_pen_color_default = 'black'
 plot_kind = ['position', 'angle']
 
-qt_global_colors = ['black', 'white', 'darkGray', 'gray', 'lightGray', 'red',
-                    'green', 'blue', 'cyan', 'magenta', 'yellow', 'darkRed',
-                    'darkGreen', 'darkBlue', 'darkCyan', 'darkMagenta',
-                    'darkYellow']
-pen_color_rgb = {'black': '#000000',
-                 'white': '#ffffff',
-                 'darkGray': '#808080',
-                 'gray': '#a0a0a4',
-                 'lightGray': '#c0c0c0',
-                 'red': '#ff0000',
+qt_global_colors = ['red', 'green', 'blue', 'cyan', 'magenta', 'yellow',
+                    'darkRed', 'darkGreen', 'darkBlue', 'darkCyan',
+                    'darkMagenta', 'darkYellow', 'black', 'white', 'darkGray',
+                    'gray', 'lightGray']
+pen_color_rgb = {'red': '#ff0000',
                  'green': '#00ff00',
                  'blue': '#0000ff',
                  'cyan': '#00ffff',
@@ -90,7 +85,12 @@ pen_color_rgb = {'black': '#000000',
                  'darkBlue': '#000080',
                  'darkCyan': '#008080',
                  'darkMagenta': '#800080',
-                 'darkYellow': '#808000'}
+                 'darkYellow': '#808000',
+                 'black': '#000000',
+                 'white': '#ffffff',
+                 'darkGray': '#808080',
+                 'gray': '#a0a0a4',
+                 'lightGray': '#c0c0c0'}
 
 if '__file__' not in locals():
     __file__ = './this.py'

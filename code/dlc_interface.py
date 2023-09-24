@@ -37,7 +37,7 @@ from deeplabcut.utils import auxiliaryfunctions
 import yaml
 
 
-# %%
+# %% =================================================================
 def slugify(value, allow_unicode=True):
     """
     Taken from
@@ -57,7 +57,7 @@ def slugify(value, allow_unicode=True):
     return re.sub(r'[-\s]+', '-', value).strip('-_')
 
 
-# %% DLCinter
+# %% DLCinter =================================================================
 class DLCinter():
     """ Model class. Interface to deeplabcut
     """
@@ -125,7 +125,7 @@ class DLCinter():
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def boot_dlc_gui(self):
         cmd = 'python -m deeplabcut'
-        subprocess.Popen(shlex.split(cmd))
+        subprocess.Popen(shlex.split(cmd), cwd=self.DATA_ROOT)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def set_config(self, config_path0):
@@ -581,7 +581,8 @@ class DLCinter():
 
         if not cmd_path.is_file():
             self.show_err_msg(f'Not found {cmd_path}.')
-        cmd_path = os.path.relpath(cmd_path, work_dir)
+            return
+        # cmd_path = os.path.relpath(cmd_path, work_dir)
         script_f = work_dir / 'DLC_training.sh'
         cmd = f'python {cmd_path} --config {conf_path}'
         cmd += " --evaluate_network"
