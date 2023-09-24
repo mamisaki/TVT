@@ -67,30 +67,30 @@ from dlc_interface import DLCinter
 
 # %% Default values
 tracking_point_radius_default = 2
-tracking_point_pen_color_default = 'black'
+tracking_point_pen_color_default = 'darkRed'
 plot_kind = ['position', 'angle']
 
-qt_global_colors = ['black', 'white', 'darkGray', 'gray', 'lightGray', 'red',
-                    'green', 'blue', 'cyan', 'magenta', 'yellow', 'darkRed',
-                    'darkGreen', 'darkBlue', 'darkCyan', 'darkMagenta',
-                    'darkYellow']
-pen_color_rgb = {'black': '#000000',
-                 'white': '#ffffff',
-                 'darkGray': '#808080',
-                 'gray': '#a0a0a4',
-                 'lightGray': '#c0c0c0',
+qt_global_colors = ['darkRed', 'darkGreen', 'darkBlue', 'darkCyan',
+                    'darkMagenta', 'darkYellow', 'red', 'green', 'blue',
+                    'cyan', 'magenta', 'yellow', 'black', 'white', 'darkGray',
+                    'gray', 'lightGray']
+pen_color_rgb = {'darkRed': '#800000',
+                 'darkGreen': '#008000',
+                 'darkBlue': '#000080',
+                 'darkCyan': '#008080',
+                 'darkMagenta': '#800080',
+                 'darkYellow': '#808000',
                  'red': '#ff0000',
                  'green': '#00ff00',
                  'blue': '#0000ff',
                  'cyan': '#00ffff',
                  'magenta': '#ff00ff',
                  'yellow': '#ffff00',
-                 'darkRed': '#800000',
-                 'darkGreen': '#008000',
-                 'darkBlue': '#000080',
-                 'darkCyan': '#008080',
-                 'darkMagenta': '#800080',
-                 'darkYellow': '#808000'}
+                 'black': '#000000',
+                 'white': '#ffffff',
+                 'darkGray': '#808080',
+                 'gray': '#a0a0a4',
+                 'lightGray': '#c0c0c0'}
 
 if '__file__' not in locals():
     __file__ = './this.py'
@@ -1162,8 +1162,9 @@ class DLC_GUI(QObject):
             self.dlci.config_path = conf_file
 
         elif call == 'edit_config':
-            default_values = {'bodyparts': ['LEYE', 'MID', 'REYE', 'NOSE'],
-                              'dotsize': 6}
+            default_values = {}
+            # default_values = {'bodyparts': ['LEYE', 'MID', 'REYE', 'NOSE'],
+            #                   'dotsize': 6}
             self.dlci.edit_config(self.main_win.ui_edit_config,
                                   default_values=default_values)
 
@@ -1445,7 +1446,7 @@ class DLC_GUI(QObject):
             settings['current_point_name'] = \
                 self.main_win.roi_idx_cmbbx.currentText()
 
-        # --- Convert Path to relative to APP_ROOT ---
+        # --- Convert Path to relative to DATA_ROOT ---
         def path_to_rel(param):
             if type(param) is dict:
                 for k, v in param.items():
@@ -1807,7 +1808,9 @@ class ViewWindow(QMainWindow):
                                                 ask_confirm=True))
         self.roi_load_btn.clicked.connect(partial(self.model.load_tracking,
                                                   fileName=None))
-        self.roi_export_btn.clicked.connect(self.model.export_roi_data)
+
+        self.roi_export_btn.clicked.connect(
+            lambda state: self.model.export_roi_data())
 
         # Time-course plot
         self.roi_plot_canvas.mpl_connect('button_press_event',

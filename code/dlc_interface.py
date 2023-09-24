@@ -37,7 +37,7 @@ from deeplabcut.utils import auxiliaryfunctions
 import yaml
 
 
-# %%
+# %% =================================================================
 def slugify(value, allow_unicode=True):
     """
     Taken from
@@ -57,7 +57,7 @@ def slugify(value, allow_unicode=True):
     return re.sub(r'[-\s]+', '-', value).strip('-_')
 
 
-# %% DLCinter
+# %% DLCinter =================================================================
 class DLCinter():
     """ Model class. Interface to deeplabcut
     """
@@ -125,7 +125,7 @@ class DLCinter():
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def boot_dlc_gui(self):
         cmd = 'python -m deeplabcut'
-        subprocess.Popen(shlex.split(cmd))
+        subprocess.Popen(shlex.split(cmd), cwd=self.DATA_ROOT)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def set_config(self, config_path0):

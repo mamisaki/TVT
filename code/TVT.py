@@ -67,20 +67,15 @@ from csq_reader import CSQ_READER
 
 # %% Default values ===========================================================
 tracking_point_radius_default = 6
-tracking_point_pen_color_default = 'blue'
+tracking_point_pen_color_default = 'darkRed'
 Aggfuncs = ['mean', 'median', 'min', 'max']
 tracking_point_aggfunc_default = 'mean'
 
-qt_global_colors = ['black', 'white', 'darkGray', 'gray', 'lightGray', 'red',
-                    'green', 'blue', 'cyan', 'magenta', 'yellow', 'darkRed',
-                    'darkGreen', 'darkBlue', 'darkCyan', 'darkMagenta',
-                    'darkYellow']
-pen_color_rgb = {'black': '#000000',
-                 'white': '#ffffff',
-                 'darkGray': '#808080',
-                 'gray': '#a0a0a4',
-                 'lightGray': '#c0c0c0',
-                 'red': '#ff0000',
+qt_global_colors = ['red', 'green', 'blue', 'cyan', 'magenta', 'yellow',
+                    'darkRed', 'darkGreen', 'darkBlue', 'darkCyan',
+                    'darkMagenta', 'darkYellow', 'black', 'white', 'darkGray',
+                    'gray', 'lightGray']
+pen_color_rgb = {'red': '#ff0000',
                  'green': '#00ff00',
                  'blue': '#0000ff',
                  'cyan': '#00ffff',
@@ -91,7 +86,12 @@ pen_color_rgb = {'black': '#000000',
                  'darkBlue': '#000080',
                  'darkCyan': '#008080',
                  'darkMagenta': '#800080',
-                 'darkYellow': '#808000'}
+                 'darkYellow': '#808000',
+                 'black': '#000000',
+                 'white': '#ffffff',
+                 'darkGray': '#808080',
+                 'gray': '#a0a0a4',
+                 'lightGray': '#c0c0c0'}
 
 themro_cmap = cv2.COLORMAP_JET
 
@@ -2920,7 +2920,8 @@ class MainWindow(QMainWindow):
 
         self.roi_load_btn.clicked.connect(
             partial(self.model.load_tracking, fileName=None))
-        self.roi_export_btn.clicked.connect(self.model.export_roi_data)
+        self.roi_export_btn.clicked.connect(
+            lambda state: self.model.export_roi_data())
 
         # Time-course plot
         self.roi_plot_canvas.mpl_connect('button_press_event',
