@@ -1162,8 +1162,9 @@ class DLC_GUI(QObject):
             self.dlci.config_path = conf_file
 
         elif call == 'edit_config':
-            default_values = {'bodyparts': ['LEYE', 'MID', 'REYE', 'NOSE'],
-                              'dotsize': 6}
+            default_values = {}
+            # default_values = {'bodyparts': ['LEYE', 'MID', 'REYE', 'NOSE'],
+            #                   'dotsize': 6}
             self.dlci.edit_config(self.main_win.ui_edit_config,
                                   default_values=default_values)
 
