@@ -125,7 +125,12 @@ class DLCinter():
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def boot_dlc_gui(self):
         cmd = 'python -m deeplabcut'
-        subprocess.Popen(shlex.split(cmd), cwd=self.DATA_ROOT)
+        
+        if self._config_work_path is not None:
+            cwd = self._config_work_path.parent
+        else:
+            cwd = self.DATA_ROOT
+        subprocess.Popen(shlex.split(cmd), cwd=cwd)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def set_config(self, config_path0):
@@ -592,32 +597,34 @@ class DLCinter():
             cmd += f" --analyze_videos {' '.join(video_path)}"
             cmd += " --filterpredictions"
 
-        with open(script_f, 'w') as fd:
-            fd.write(cmd)
-
         if self.OS == 'Windows':
-            run_cmd = f"bash.exe {script_f.name}"
+            run_cmd = "bash.exe"
         else:
-            run_cmd = f"/bin/bash {script_f.name}"
+            run_cmd = "/bin/bash"
 
-        if proc_type == 'run_subprocess':
-            run_cmd = f"cd {work_dir} && " + run_cmd
-            subprocess.Popen(run_cmd, stdout=open(log_f, 'a'),
-                             stderr=open(log_f, 'a'), shell=True)
+        if proc_type == 'prepare_script':
+            with open(script_f, 'w') as fd:
+                fd.write('#!/bin/bash\n')
+                fd.write(cmd)
 
-            msg = 'Training has been started.\n'
-            msg += f"Progress is being written in {log_f}\n"
-            msg += 'It may take a long time.'
-            self.show_msg(msg)
-
-        elif proc_type == 'prepare_script':
             msg = f"The process script is made as\n {script_f}\n\n"
             msg += "Run the script in a console"
-            msg += " by copy and paste the following lines;\n"
-            msg += " (modify the path if necessary)\n\n"
+            msg += " by copy and paste the following lines;\n\n"
             msg += "conda activate TVT\n"
-            msg += f"cd {work_dir}\n"
-            msg += f"nohup {run_cmd} > {log_f.relative_to(work_dir)} &"
+            msg += f"cd '{work_dir}'\n"
+            msg += f"nohup {run_cmd} {script_f.relative_to(work_dir)}"
+            msg += f" > {log_f.relative_to(work_dir)} &"
+            self.show_msg(msg)
+
+        elif proc_type == 'run_subprocess':
+            subrun_cmd = "source ~/.bashrc; "
+            subrun_cmd += "conda activate TVT; "
+            subrun_cmd += f"{run_cmd} '{script_f}'"
+            subprocess.Popen(subrun_cmd, stdout=open(log_f, 'a'),
+                             stderr=open(log_f, 'a'), shell=True,
+                             executable='/bin/bash')
+            msg = 'Training has been started.\n'
+            msg += f"Progress is being written in {log_f}\n"
             self.show_msg(msg)
 
         elif proc_type == 'run_here':
