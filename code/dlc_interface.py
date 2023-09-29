@@ -125,7 +125,7 @@ class DLCinter():
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def boot_dlc_gui(self):
         cmd = 'python -m deeplabcut'
-        
+
         if self._config_work_path is not None:
             cwd = self._config_work_path.parent
         else:
@@ -182,7 +182,8 @@ class DLCinter():
             project_path = Path(config_data['project_path'])
             DATA_ROOT = self.DATA_ROOT
             try:
-                project_path = os.path.relpath(project_path, DATA_ROOT)
+                project_path = os.path.relpath(project_path.resolve(),
+                                               DATA_ROOT.resolve())
                 project_path = str(project_path).replace(os.sep, '/')
                 project_path = '${DATA_ROOT}/' + project_path
             except Exception:
@@ -193,7 +194,8 @@ class DLCinter():
             video_sets = {}
             for vf0 in config_data['video_sets'].keys():
                 try:
-                    vf = os.path.relpath(Path(vf0), DATA_ROOT)
+                    vf = os.path.relpath(Path(vf0).resolve(),
+                                         DATA_ROOT.resolve())
                     vf = str(vf).replace(os.sep, '/')
                     vf = '${DATA_ROOT}/' + vf
                 except Exception:
@@ -617,8 +619,15 @@ class DLCinter():
             self.show_msg(msg)
 
         elif proc_type == 'run_subprocess':
-            subrun_cmd = "source ~/.bashrc; "
+            conda_dir = Path.home() / 'anaconda3'
+            if not conda_dir.is_dir():
+                self.show_err_msg(f"Not found {conda_dir}")
+                return
+
+            conda_cmd = conda_dir / 'etc' / 'profile.d' / 'conda.sh'
+            subrun_cmd = f". {conda_cmd}; "
             subrun_cmd += "conda activate TVT; "
+            subrun_cmd += f"cd '{work_dir}'; "
             subrun_cmd += f"{run_cmd} '{script_f}'"
             subprocess.Popen(subrun_cmd, stdout=open(log_f, 'a'),
                              stderr=open(log_f, 'a'), shell=True,
