@@ -29,8 +29,9 @@ Create deeplabcut environment
 """
 
 
-# %% import -------------------------------------------------------------------
+# %% import ===================================================================
 from pathlib import Path, PurePath
+import os
 import sys
 from datetime import timedelta
 from functools import partial
@@ -41,6 +42,7 @@ import shutil
 import time
 import json
 import traceback
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -65,7 +67,7 @@ from data_movie import DataMovie, DisplayImage
 from dlc_interface import DLCinter
 
 
-# %% Default values
+# %% Default values ===========================================================
 tracking_point_radius_default = 2
 tracking_point_pen_color_default = 'darkRed'
 plot_kind = ['position', 'angle']
@@ -100,7 +102,7 @@ APP_ROOT = Path(__file__).absolute().parent.parent
 OS = platform.system()
 
 
-# %% TrackingPoint class ====================================================
+# %% TrackingPoint class ======================================================
 class TrackingPoint():
     """ Tracking point data class.
     Each point is an instance of TrackingPoint class.
@@ -176,12 +178,14 @@ class VideoDataMovie(DataMovie):
     def __init__(self, parent, dispImg, UI_objs):
         super().__init__(parent, dispImg, UI_objs)
         self.videoCap = None
+        self.file_path = None
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def open(self, filename):
         if self.loaded:
             self.unload()
 
+        self.file_path = Path(filename)
         self.videoCap = cv2.VideoCapture(str(filename))
         self.frame_rate = self.videoCap.get(cv2.CAP_PROP_FPS)
         self.duration_frame = \
@@ -341,26 +345,20 @@ class DLC_GUI(QObject):
 
         # --- Load last working status ----------------------------------------
         self.loaded_state_f = None
-        self.tmp_state_f = APP_ROOT / 'config' / 'DLCGUI_tmp_working_state.pkl'
+        self.state_dir = self.DATA_ROOT / 'work_state'
         self.num_saved_setting_hist = 5
-        last_state_f = APP_ROOT / 'config' / 'DLCGUI_last_working_state-0.pkl'
+        last_state_f = self.state_dir / 'DLCGUI_last_working_state-0.pkl'
         if not last_state_f.parent.is_dir():
-            last_state_f.parent.mkdir()
+            os.makedirs(last_state_f.parent)
 
         if not batchmode:
             self.save_timer = QTimer()
             self.save_timer.setSingleShot(True)
             self.save_timer.timeout.connect(self.save_tmp_status)
-            self.save_tmp_wait = 60  # seconds
+            self.save_tmp_wait = 30  # seconds
             self.save_timer.start(self.save_tmp_wait * 1000)
 
-            if self.tmp_state_f.is_file():
-                ret = QMessageBox.question(self.main_win, "Recover state",
-                                           "Recover the last aborted state?",
-                                           QMessageBox.Yes | QMessageBox.No)
-                if ret == QMessageBox.Yes:
-                    self.load_status(fname=self.tmp_state_f)
-            elif last_state_f.is_file():
+            if last_state_f.is_file():
                 ret = QMessageBox.question(self.main_win, "Load last state",
                                            "Retrieve the last working state?",
                                            QMessageBox.Yes | QMessageBox.No)
@@ -378,8 +376,22 @@ class DLC_GUI(QObject):
 
             if fileName == '':
                 return
-
         fileName = Path(fileName)
+
+        if not str(fileName.absolute()).startswith(
+                str(self.DATA_ROOT.absolute())):
+            # the data file is not in the DATA_ROOT
+            msgBox = QMessageBox()
+            msgBox.setText(
+                f"The video file is not located under {self.DATA_ROOT}."
+                f" Would you like to copy it there ({self.DATA_ROOT})?")
+            msgBox.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            msgBox.setDefaultButton(QMessageBox.Yes)
+            ret = msgBox.exec()
+            if ret == QMessageBox.Yes:
+                destination = self.DATA_ROOT / fileName.name
+                shutil.copy(fileName, destination)
+                fileName = destination  # Update filePath to the new location
 
         self.videoData.open(fileName)
         self.main_win.unloadVideoDataBtn.setText(
@@ -1162,6 +1174,9 @@ class DLC_GUI(QObject):
             self.dlci.config_path = conf_file
 
         elif call == 'edit_config':
+            if not self.dlci.config_path.is_file():
+                return
+
             default_values = {}
             # default_values = {'bodyparts': ['LEYE', 'MID', 'REYE', 'NOSE'],
             #                   'dotsize': 6}
@@ -1180,13 +1195,6 @@ class DLC_GUI(QObject):
             msgBox.close()
 
         elif call == 'label_frames':
-            # Save the current status because DLC's GUI window may kill the
-            # process at exit.
-            fname = APP_ROOT / 'config' / 'DLCGUI_last_working_state-0.pkl'
-            if not fname.parent.is_dir():
-                fname.parent.mkdir()
-            self.save_status(fname=fname)
-
             self.dlci.label_frames(edit_gui_fn=self.main_win.ui_edit_config)
 
         elif call == 'check_labels':
@@ -1254,12 +1262,6 @@ class DLC_GUI(QObject):
             self.dlci.extract_outlier_frames(self.videoData.filename)
 
         elif call == 'refine_labels':
-            # Save working setting
-            fname = APP_ROOT / 'config' / 'DLCGUI_last_working_state-0.pkl'
-            if not fname.parent.is_dir():
-                fname.parent.mkdir()
-            self.save_status(fname=fname)
-
             self.dlci.refine_labels()
 
         elif call == 'merge_datasets':
@@ -1384,7 +1386,12 @@ class DLC_GUI(QObject):
     def save_status(self, fname=None, **kwargs):
         # --- Filename setup ---
         if fname is None:
-            stdir = APP_ROOT
+            stdir = self.DATA_ROOT / 'work_state'
+            video_name = self.videoData.file_path.stem
+            if video_name is not None:
+                dtstr = datetime.now().strftime("%Y%m%d%H%M")
+                stdir = stdir / f"{video_name}_working_state_{dtstr}.pkl"
+
             if self.loaded_state_f is not None:
                 stdir = self.loaded_state_f
 
@@ -1402,8 +1409,7 @@ class DLC_GUI(QObject):
             self.loaded_state_f = fname
         else:
             if not fname.parent.is_dir():
-                self.main_win.error_MessageBox(f"Not found {fname.parent}.")
-                return
+                os.makedirs(fname.parent)
 
         # --- Extract saving parameter values for the model object ---
         settings = {}
@@ -1489,7 +1495,7 @@ class DLC_GUI(QObject):
         if fname is None:
             stdir = self.DATA_ROOT / 'work_state'
             fname, _ = QFileDialog.getOpenFileName(
-                self.main_win, "Open setting file", str(stdir),
+                self.main_win, "Open state file", str(stdir),
                 "pickle (*.pkl)", None, QFileDialog.DontUseNativeDialog)
             if fname == '':
                 return
@@ -1497,8 +1503,7 @@ class DLC_GUI(QObject):
         with open(fname, 'rb') as fd:
             settings = pickle.load(fd)
 
-        if fname != self.tmp_state_f and \
-                fname != APP_ROOT / 'config' / \
+        if fname != self.DATA_ROOT / 'work_state' / \
                 'DLCGUI_last_working_state-0.pkl':
             self.loaded_state_f = Path(fname)
 
@@ -1575,8 +1580,13 @@ class DLC_GUI(QObject):
                 setattr(self, param, obj)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def save_tmp_status(self):
-        self.save_status(fname=self.tmp_state_f)
+    def save_tmp_status(self, timer=True):
+        if self.videoData.file_path is not None:
+            video_name = self.videoData.file_path.stem
+            save_f = self.DATA_ROOT / 'work_state' / \
+                f"{video_name}_working_state.pkl"
+            self.save_status(fname=save_f)
+
         self.save_timer.start(self.save_tmp_wait * 1000)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1943,17 +1953,17 @@ class ViewWindow(QMainWindow):
         fileMenu = menuBar.addMenu('&File')
 
         # Load
-        loadSettingAction = QAction('&Load woking state', self)
+        loadSettingAction = QAction('&Load working state', self)
         loadSettingAction.setShortcut('Ctrl+L')
-        loadSettingAction.setStatusTip('Load woking state')
+        loadSettingAction.setStatusTip('Load working state')
         loadSettingAction.triggered.connect(partial(self.model.load_status,
                                                     fname=None))
         fileMenu.addAction(loadSettingAction)
 
         # Save
-        saveSettingAction = QAction('&Save woking state', self)
+        saveSettingAction = QAction('&Save working state', self)
         saveSettingAction.setShortcut('Ctrl+S')
-        saveSettingAction.setStatusTip('Save woking state')
+        saveSettingAction.setStatusTip('Save working state')
         saveSettingAction.triggered.connect(partial(self.model.save_status,
                                                     fname=None))
         fileMenu.addAction(saveSettingAction)
@@ -1961,7 +1971,7 @@ class ViewWindow(QMainWindow):
         # Set DATA_ROOT
         setDataRootAction = QAction('&Set data root', self)
         setDataRootAction.setShortcut('Ctrl+D')
-        setDataRootAction.setStatusTip('Load woking state')
+        setDataRootAction.setStatusTip('Load working state')
         setDataRootAction.triggered.connect(
             partial(self.model.set_data_root, data_dir=None))
         fileMenu.addAction(setDataRootAction)
@@ -1982,7 +1992,7 @@ class ViewWindow(QMainWindow):
         action.triggered.connect(partial(self.model.dlc_call, 'new_project'))
         dlcMenu.addAction(action)
 
-        action = QAction('- Load config', self)
+        action = QAction('Load config', self)
         action.setStatusTip('Load existing DeepLabCut configuraton')
         action.triggered.connect(partial(self.model.dlc_call, 'load_config'))
         dlcMenu.addAction(action)
@@ -2004,6 +2014,26 @@ class ViewWindow(QMainWindow):
             'Make a command script for DeepLabCut network training')
         action.triggered.connect(partial(self.model.dlc_call,
                                          'train_network', 'prepare_script'))
+        dlcMenu.addAction(action)
+
+        action = QAction('Run training backgroud', self)
+        action.setStatusTip(
+            'Create a command script for DeepLabCut network training and run' +
+            ' it in the background')
+        action.triggered.connect(partial(self.model.dlc_call,
+                                         'train_network', 'run_subprocess'))
+        dlcMenu.addAction(action)
+
+        action = QAction('Analyze video', self)
+        action.setStatusTip('Analyze video by DeepLabCut')
+        action.triggered.connect(partial(self.model.dlc_call,
+                                         'analyze_videos'))
+        dlcMenu.addAction(action)
+
+        action = QAction('Filter prediction', self)
+        action.setStatusTip('Filter prediction by DeepLabCut')
+        action.triggered.connect(
+                partial(self.model.dlc_call, 'filterpredictions'))
         dlcMenu.addAction(action)
 
         # -- XI --
@@ -2147,19 +2177,14 @@ class ViewWindow(QMainWindow):
     def closeEvent(self, event):
         if self.model.videoData.loaded:
             # Save working setting
-            fname = APP_ROOT / 'config' / 'DLCGUI_last_working_state-0.pkl'
+            fname = self.model.DATA_ROOT / 'work_state' / \
+                'DLCGUI_last_working_state-0.pkl'
             if not fname.parent.is_dir():
                 fname.parent.mkdir()
 
             self.model.shift_save_setting_fname(fname)
             self.model.save_status(fname)
-
-            # Copy the state file to data root
-            data_dir = self.model.videoData.filename.parent
-            shutil.copy(fname, data_dir / fname.name)
-
-        if self.model.tmp_state_f.is_file():
-            self.model.tmp_state_f.unlink()
+            self.model.save_tmp_status(timer=False)
 
         if self.model.CONF_DIR.is_dir():
             for rmf in self.model.CONF_DIR.glob('*.fff'):
