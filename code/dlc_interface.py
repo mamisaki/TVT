@@ -632,12 +632,30 @@ class DLCinter():
             subprocess.Popen(subrun_cmd, stdout=open(log_f, 'a'),
                              stderr=open(log_f, 'a'), shell=True,
                              executable='/bin/bash')
-            msg = 'Training has been started.\n'
-            msg += f"Progress is being written in {log_f}\n"
+
+            self.show_training_progress()
+            msg = 'Training has started in the background.\n'
+            msg += f"Progress is written to {log_f}\n"
             self.show_msg(msg)
 
         elif proc_type == 'run_here':
             dlc.train_network(self._config_work_path)
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def show_training_progress(self):
+        if not self.check_config_file():
+            return
+
+        work_dir = Path(self._config_work_path).parent
+        log_f = work_dir / 'DLC_train.out'
+        if not log_f.is_file():
+            self.show_err_msg('No log file exists for the current config.')
+            return
+
+        tail_cmd = f'tail -n 1000 -f {log_f}'
+        if sys.platform == 'linux':
+            cmd = f"gnome-terminal -- bash -c '{tail_cmd}'"
+            subprocess.call(shlex.split(cmd))
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def find_analysis_results(self, video_path, shuffle=1):

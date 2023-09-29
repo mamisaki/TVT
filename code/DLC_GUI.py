@@ -1218,6 +1218,9 @@ class DLC_GUI(QObject):
             self.dlci.train_network(proc_type=opt,
                                     analyze_videos=[self.videoData.filename])
 
+        elif call == 'show_training_progress':
+            self.dlci.show_training_progress()
+
         elif call == 'evaluate_network':
             self.dlci.evaluate_network()
 
@@ -2022,6 +2025,13 @@ class ViewWindow(QMainWindow):
             ' it in the background')
         action.triggered.connect(partial(self.model.dlc_call,
                                          'train_network', 'run_subprocess'))
+        dlcMenu.addAction(action)
+
+        action = QAction('Show training progress', self)
+        action.setStatusTip(
+            'Show the progress of the training running in the background.')
+        action.triggered.connect(
+            partial(self.model.dlc_call, 'show_training_progress'))
         dlcMenu.addAction(action)
 
         action = QAction('Analyze video', self)
