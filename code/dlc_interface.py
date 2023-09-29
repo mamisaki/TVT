@@ -629,8 +629,8 @@ class DLCinter():
             subrun_cmd += "conda activate TVT; "
             subrun_cmd += f"cd '{work_dir}'; "
             subrun_cmd += f"{run_cmd} '{script_f}'"
-            subprocess.Popen(subrun_cmd, stdout=open(log_f, 'a'),
-                             stderr=open(log_f, 'a'), shell=True,
+            subprocess.Popen(subrun_cmd, stdout=open(log_f, 'w'),
+                             stderr=open(log_f, 'w'), shell=True,
                              executable='/bin/bash')
 
             self.show_training_progress()

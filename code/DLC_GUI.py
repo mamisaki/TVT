@@ -1955,7 +1955,7 @@ class ViewWindow(QMainWindow):
         # -- File menu --
         fileMenu = menuBar.addMenu('&File')
 
-        # Load
+        # Load status
         loadSettingAction = QAction('&Load working state', self)
         loadSettingAction.setShortcut('Ctrl+L')
         loadSettingAction.setStatusTip('Load working state')
@@ -1963,7 +1963,7 @@ class ViewWindow(QMainWindow):
                                                     fname=None))
         fileMenu.addAction(loadSettingAction)
 
-        # Save
+        # Save status
         saveSettingAction = QAction('&Save working state', self)
         saveSettingAction.setShortcut('Ctrl+S')
         saveSettingAction.setStatusTip('Save working state')
@@ -1978,6 +1978,18 @@ class ViewWindow(QMainWindow):
         setDataRootAction.triggered.connect(
             partial(self.model.set_data_root, data_dir=None))
         fileMenu.addAction(setDataRootAction)
+
+        fileMenu.addSeparator()
+
+        # Load video file
+        loadVideoAction = QAction('&Load video data', self)
+        loadVideoAction.setShortcut('Ctrl+N')
+        loadVideoAction.setStatusTip('Load video data')
+        loadVideoAction.triggered.connect(
+            self.model.openVideoFile)
+        fileMenu.addAction(loadVideoAction)
+
+        fileMenu.addSeparator()
 
         # Exit
         exitAction = QAction('&Exit', self)
@@ -1995,6 +2007,8 @@ class ViewWindow(QMainWindow):
         action.triggered.connect(partial(self.model.dlc_call, 'new_project'))
         dlcMenu.addAction(action)
 
+        dlcMenu.addSeparator()
+
         action = QAction('Load config', self)
         action.setStatusTip('Load existing DeepLabCut configuraton')
         action.triggered.connect(partial(self.model.dlc_call, 'load_config'))
@@ -2006,11 +2020,15 @@ class ViewWindow(QMainWindow):
         action.triggered.connect(partial(self.model.dlc_call, 'edit_config'))
         dlcMenu.addAction(action)
 
+        dlcMenu.addSeparator()
+
         # -- Boot deeplabcut GUI ---
         action = QAction('deeplabcut GUI', self)
         action.setStatusTip('Boot deeplabcut GUI application')
         action.triggered.connect(partial(self.model.dlc_call, 'boot_dlc_gui'))
         dlcMenu.addAction(action)
+
+        dlcMenu.addSeparator()
 
         action = QAction('Make a training script', self)
         action.setStatusTip(
@@ -2034,6 +2052,8 @@ class ViewWindow(QMainWindow):
             partial(self.model.dlc_call, 'show_training_progress'))
         dlcMenu.addAction(action)
 
+        dlcMenu.addSeparator()
+
         action = QAction('Analyze video', self)
         action.setStatusTip('Analyze video by DeepLabCut')
         action.triggered.connect(partial(self.model.dlc_call,
@@ -2045,6 +2065,8 @@ class ViewWindow(QMainWindow):
         action.triggered.connect(
                 partial(self.model.dlc_call, 'filterpredictions'))
         dlcMenu.addAction(action)
+
+        dlcMenu.addSeparator()
 
         # -- XI --
         action = QAction('Load tracking positions', self)
