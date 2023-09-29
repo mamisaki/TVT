@@ -149,12 +149,12 @@ class DLCinter():
             # convert to absolute path
             project_path = config_data['project_path']
             project_path = project_path.replace('${DATA_ROOT}/', '')
-            project_path = str((self.DATA_ROOT / project_path).resolve())
+            project_path = str(self.DATA_ROOT / project_path)
 
             video_sets = {}
             for vf0 in config_data['video_sets'].keys():
                 vf = vf0.replace('${DATA_ROOT}/', '')
-                vf = str((self.DATA_ROOT / vf).resolve())
+                vf = str((self.DATA_ROOT / vf))
                 video_sets[vf] = config_data['video_sets'][vf0]
 
             config_data['project_path'] = project_path
@@ -174,8 +174,8 @@ class DLCinter():
                 return
 
             # convert to relative path
-            project_path = Path(config_data['project_path']).resolve()
-            DATA_ROOT = self.DATA_ROOT.resolve()
+            project_path = Path(config_data['project_path'])
+            DATA_ROOT = self.DATA_ROOT
             try:
                 project_path = os.path.relpath(project_path, DATA_ROOT)
                 project_path = str(project_path).replace(os.sep, '/')
@@ -188,7 +188,7 @@ class DLCinter():
             video_sets = {}
             for vf0 in config_data['video_sets'].keys():
                 try:
-                    vf = os.path.relpath(Path(vf0).resolve(), DATA_ROOT)
+                    vf = os.path.relpath(Path(vf0), DATA_ROOT)
                     vf = str(vf).replace(os.sep, '/')
                     vf = '${DATA_ROOT}/' + vf
                 except Exception:
@@ -570,7 +570,7 @@ class DLCinter():
                 pass
 
         # --- Make training script --------------------------------------------
-        work_dir = Path(self._config_work_path).resolve().parent
+        work_dir = Path(self._config_work_path).parent
 
         # Update config_rel.yaml file
         self.set_config(self._config_work_path)
@@ -587,7 +587,7 @@ class DLCinter():
         cmd = f'python {cmd_path} --config {conf_path}'
         cmd += " --evaluate_network"
         if len(analyze_videos):
-            video_path = [str(Path(os.path.relpath(pp.resolve(), work_dir)))
+            video_path = [str(Path(os.path.relpath(pp, work_dir)))
                           for pp in analyze_videos]
             cmd += f" --analyze_videos {' '.join(video_path)}"
             cmd += " --filterpredictions"

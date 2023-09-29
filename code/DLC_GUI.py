@@ -1408,7 +1408,7 @@ class DLC_GUI(QObject):
         # --- Extract saving parameter values for the model object ---
         settings = {}
         saving_params = ['time_marker', 'videoData', 'tracking_point',
-                         'tracking_mark', 'dlci', 'DATA_ROOT']
+                         'tracking_mark', 'dlci']
         for param in saving_params:
             if not hasattr(self, param):
                 continue
@@ -1487,7 +1487,7 @@ class DLC_GUI(QObject):
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def load_status(self, fname=None, **kwargs):
         if fname is None:
-            stdir = APP_ROOT
+            stdir = self.DATA_ROOT / 'work_state'
             fname, _ = QFileDialog.getOpenFileName(
                 self.main_win, "Open setting file", str(stdir),
                 "pickle (*.pkl)", None, QFileDialog.DontUseNativeDialog)
@@ -1501,13 +1501,6 @@ class DLC_GUI(QObject):
                 fname != APP_ROOT / 'config' / \
                 'DLCGUI_last_working_state-0.pkl':
             self.loaded_state_f = Path(fname)
-
-        # Load DATA_ROOT
-        if 'DATA_ROOT' in settings:
-            if Path(settings['DATA_ROOT']).is_dir():
-                self.DATA_ROOT = Path(settings['DATA_ROOT'])
-                self.dlci.DATA_ROOT = self.DATA_ROOT
-            del settings['DATA_ROOT']
 
         # Load videoData
         if 'videoData' in settings:
@@ -1601,6 +1594,10 @@ class DLC_GUI(QObject):
 
         self.DATA_ROOT = Path(data_dir)
         self.dlci.DATA_ROOT = self.DATA_ROOT
+
+        conf = {'DATA_ROOT': str(self.DATA_ROOT)}
+        with open(self.conf_f, 'w') as fd:
+            json.dump(conf, fd)
 
 
 # %% View class : ViewWindow ==================================================
