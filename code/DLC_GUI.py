@@ -276,7 +276,7 @@ class DLC_GUI(QObject):
     edit_point_signal = pyqtSignal(str)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def __init__(self, main_win, batchmode=False):
+    def __init__(self, main_win, batchmode=False, save_interval=10):
         super(DLC_GUI, self).__init__(parent=main_win)
 
         # View model
@@ -286,13 +286,14 @@ class DLC_GUI(QObject):
         self.DATA_ROOT = APP_ROOT / 'data'
 
         # --- Video data ------------------------------------------------------
-        video_UI_objs = {'frFwdBtn': self.main_win.videoFrameFwdBtn,
-                         'frBkwBtn': self.main_win.videoFrameBkwBtn,
-                         'skipFwdBtn': self.main_win.videoSkipFwdBtn,
-                         'skipBkwBtn': self.main_win.videoSkipBkwBtn,
-                         'positionLabel': self.main_win.videoPositionLab}
+        self.video_UI_objs = {
+            'frFwdBtn': self.main_win.videoFrameFwdBtn,
+            'frBkwBtn': self.main_win.videoFrameBkwBtn,
+            'skipFwdBtn': self.main_win.videoSkipFwdBtn,
+            'skipBkwBtn': self.main_win.videoSkipBkwBtn,
+            'positionLabel': self.main_win.videoPositionLab}
         self.videoData = VideoDataMovie(self, self.main_win.videoDispImg,
-                                        video_UI_objs)
+                                        self.video_UI_objs)
 
         # Point marker (black dot) position
         self.point_mark_xy = [0, 0]
@@ -345,9 +346,8 @@ class DLC_GUI(QObject):
 
         # --- Load last working status ----------------------------------------
         self.loaded_state_f = None
-        self.state_dir = self.DATA_ROOT / 'work_state'
         self.num_saved_setting_hist = 5
-        last_state_f = self.state_dir / 'DLCGUI_last_working_state-0.pkl'
+        last_state_f = APP_ROOT / 'config' / 'DLCGUI_last_working_state-0.pkl'
         if not last_state_f.parent.is_dir():
             os.makedirs(last_state_f.parent)
 
@@ -355,7 +355,7 @@ class DLC_GUI(QObject):
             self.save_timer = QTimer()
             self.save_timer.setSingleShot(True)
             self.save_timer.timeout.connect(self.save_tmp_status)
-            self.save_tmp_wait = 30  # seconds
+            self.save_tmp_wait = save_interval  # seconds
             self.save_timer.start(self.save_tmp_wait * 1000)
 
             if last_state_f.is_file():
@@ -414,8 +414,15 @@ class DLC_GUI(QObject):
         self.time_marker = {}
         self.tracking_points = {}
 
+        # Reset videoData
+        del self.videoData
+        self.videoData = VideoDataMovie(
+            self, self.main_win.videoDispImg, self.video_UI_objs)
+
         # Reset dlci
-        self.dlci = DLCinter(self.DATA_ROOT, parent=self.parent)
+        del self.dlci
+        self.dlci = DLCinter(self.DATA_ROOT,
+                             ui_parent=self.main_win)
 
         # Disable UIs
         self.main_win.positionSlider.setEnabled(False)
@@ -1141,16 +1148,17 @@ class DLC_GUI(QObject):
     # --- DeepLabCut interface ------------------------------------------------
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def dlc_call(self, call, opt=None):
+        if call != 'batch_run_training':
+            # Check if the video is loaded
+            if not hasattr(self, 'videoData') or not self.videoData.loaded:
+                self.main_win.error_MessageBox("No video data is loaded.")
+                return
 
-        # Check if the video is loaded
-        if not hasattr(self, 'videoData') or not self.videoData.loaded:
-            self.main_win.error_MessageBox("No video data is loaded.")
-            return
-
-        elif not Path(self.videoData.filename).is_file():
-            self.main_win.error_MessageBox("Not found the video file," +
-                                           f" {self.videoData.filename}.")
-            return
+            elif not Path(self.videoData.filename).is_file():
+                self.main_win.error_MessageBox(
+                    "Not found the video file," +
+                    f" {self.videoData.filename}.")
+                return
 
         if call == 'new_project':
             proj_name = self.videoData.filename.stem
@@ -1174,7 +1182,8 @@ class DLC_GUI(QObject):
             self.dlci.config_path = conf_file
 
         elif call == 'edit_config':
-            if not Path(self.dlci.config_path).is_file():
+            if self.dlci.config_path is None or \
+                    not Path(self.dlci.config_path).is_file():
                 return
 
             default_values = {}
@@ -1275,6 +1284,27 @@ class DLC_GUI(QObject):
 
         elif call == 'boot_dlc_gui':
             self.dlci.boot_dlc_gui()
+
+        elif call == 'batch_run_training':
+            # Select data directry
+            if self.DATA_ROOT.is_dir():
+                stdir = self.DATA_ROOT.parent
+            else:
+                stdir = APP_ROOT
+            data_dir = QFileDialog.getExistingDirectory(
+                self.main_win, "Select data directory",
+                str(stdir), QFileDialog.ShowDirsOnly)
+            if data_dir == '':
+                return
+
+            # Ask if overwrite
+            ret = QMessageBox.question(
+                self.main_win, "Batch run",
+                "Overwrite (re-train) the existing results?",
+                QMessageBox.No | QMessageBox.Yes)
+            overwrite = (ret == QMessageBox.Yes)
+
+            self.dlci.batch_run_training(data_dir, overwrite)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def load_tracking(self, fileName=None, lh_thresh=None, **kwargs):
@@ -1509,7 +1539,7 @@ class DLC_GUI(QObject):
         with open(fname, 'rb') as fd:
             settings = pickle.load(fd)
 
-        if fname != self.DATA_ROOT / 'work_state' / \
+        if fname != APP_ROOT / 'config' / \
                 'DLCGUI_last_working_state-0.pkl':
             self.loaded_state_f = Path(fname)
 
@@ -1593,7 +1623,8 @@ class DLC_GUI(QObject):
                 f"{video_name}_working_state.pkl"
             self.save_status(fname=save_f)
 
-        self.save_timer.start(self.save_tmp_wait * 1000)
+        if timer:
+            self.save_timer.start(self.save_tmp_wait * 1000)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def set_data_root(self, data_dir=None):
@@ -2080,6 +2111,15 @@ class ViewWindow(QMainWindow):
 
         dlcMenu.addSeparator()
 
+        action = QAction('Run all training scripts in batch mode', self)
+        action.setStatusTip(
+            'Run all training scripts in a data directory sequentially.')
+        action.triggered.connect(partial(self.model.dlc_call,
+                                         'batch_run_training'))
+        dlcMenu.addAction(action)
+
+        dlcMenu.addSeparator()
+
         # -- XI --
         action = QAction('Load tracking positions', self)
         action.setStatusTip('Load positions tracked by DeepLabCut')
@@ -2221,7 +2261,7 @@ class ViewWindow(QMainWindow):
     def closeEvent(self, event):
         if self.model.videoData.loaded:
             # Save working setting
-            fname = self.model.DATA_ROOT / 'work_state' / \
+            fname = APP_ROOT / 'config' / \
                 'DLCGUI_last_working_state-0.pkl'
             if not fname.parent.is_dir():
                 fname.parent.mkdir()

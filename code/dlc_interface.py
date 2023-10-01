@@ -157,14 +157,15 @@ class DLCinter():
             project_path = config_data['project_path']
             project_path = project_path.replace('${DATA_ROOT}/', '')
             project_path = str(self.DATA_ROOT / project_path)
+            config_data['project_path'] = project_path
 
             video_sets = {}
             for vf0 in config_data['video_sets'].keys():
-                vf = vf0.replace('${DATA_ROOT}/', '')
-                vf = str((self.DATA_ROOT / vf))
-                video_sets[vf] = config_data['video_sets'][vf0]
+                if '${DATA_ROOT}' in vf0:
+                    vf = vf0.replace('${DATA_ROOT}/', '')
+                    vf = str((self.DATA_ROOT / vf))
+                    video_sets[vf] = config_data['video_sets'][vf0]
 
-            config_data['project_path'] = project_path
             config_data['video_sets'] = video_sets
 
             out_f = Path(config_path0).parent / f'config_{self.HOSTNAME}.yaml'
@@ -349,7 +350,8 @@ class DLCinter():
             try:
                 editing_config_data = edit_gui_fn(editing_config_data,
                                                   gui_title)
-            except Exception:
+            except Exception as e:
+                self.show_err_msg(str(e) + "\nConfig edit is not saved.")
                 print(traceback.format_exc())
                 editing_config_data = None
 
@@ -548,20 +550,26 @@ class DLCinter():
         self.set_config(self._config_work_path)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def train_network(self, proc_type='run_here', analyze_videos=[]):
-        if not self.check_config_file():
+    def train_network(self, proc_type='run_here', analyze_videos=[],
+                      config_f=None):
+        if config_f is None and not self.check_config_file():
             return
 
-        work_dir = Path(self._config_work_path).parent
+        if config_f is None:
+            work_dir = Path(self._config_work_path).parent
+        else:
+            work_dir = Path(config_f).parent
 
         # Update config_rel.yaml file
-        self.set_config(self._config_work_path)
-        conf_path = Path(self._config_path).name
+        if config_f is None:
+            self.set_config(self._config_work_path)
+            conf_path = Path(self._config_path).name
+        else:
+            self.set_config(config_f)
+            conf_path = Path(self._config_path).name
 
         # --- Write a training script -----------------------------------------
         cmd_path = Path.home() / 'TVT' / 'code' / 'run_dlc_train.py'
-        log_f = work_dir / 'DLC_training.out'
-
         if not cmd_path.is_file():
             self.show_err_msg(f'Not found {cmd_path}.')
             return
@@ -578,6 +586,7 @@ class DLCinter():
 
         with open(script_f, 'w') as fd:
             fd.write('#!/bin/bash\n')
+            fd.write(f'cd {work_dir}\n')
             fd.write(cmd)
 
         if self.OS == 'Windows':
@@ -586,12 +595,12 @@ class DLCinter():
             run_cmd = "/bin/bash"
 
         # ---------------------------------------------------------------------
-        if proc_type == 'prepare_script':
+        if proc_type == 'prepare_script' and config_f is None:
+            log_f = work_dir / 'DLC_training.out'
             msg = f"The process script is made as\n {script_f}\n\n"
             msg += "Run the script in a console"
             msg += " by copy and paste the following lines;\n\n"
             msg += "conda activate TVT\n"
-            msg += f"cd '{work_dir}'\n"
             msg += f"nohup {run_cmd} {script_f.relative_to(work_dir)}"
             msg += f" > {log_f.relative_to(work_dir)} &"
             self.show_msg(msg)
@@ -624,6 +633,7 @@ class DLCinter():
                     pass
 
             # Run command
+            log_f = work_dir / 'DLC_training.out'
             conda_dir = Path.home() / 'anaconda3'
             if not conda_dir.is_dir():
                 self.show_err_msg(f"Not found {conda_dir}")
@@ -632,10 +642,9 @@ class DLCinter():
             conda_cmd = conda_dir / 'etc' / 'profile.d' / 'conda.sh'
             subrun_cmd = f". {conda_cmd}; "
             subrun_cmd += "conda activate TVT; "
-            subrun_cmd += f"cd '{work_dir}'; "
-            subrun_cmd += f"{run_cmd} {script_f.relative_to(work_dir)}"
-            subprocess.Popen(subrun_cmd, stdout=open(log_f, 'w'),
-                             stderr=open(log_f, 'w'), shell=True,
+            subrun_cmd += f"nohup {run_cmd} {script_f.relative_to(work_dir)}"
+            subrun_cmd += f" > {log_f.relative_to(work_dir)} &"
+            subprocess.Popen(subrun_cmd, shell=True, cwd=work_dir,
                              executable='/bin/bash')
 
             msg = 'Training has started in the background.\n'
@@ -648,12 +657,14 @@ class DLCinter():
             dlc.train_network(self._config_work_path)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def show_training_progress(self):
-        if not self.check_config_file():
-            return
+    def show_training_progress(self, log_f=None):
+        if log_f is None:
+            if not self.check_config_file():
+                return
 
-        work_dir = Path(self._config_work_path).parent
-        log_f = work_dir / 'DLC_training.out'
+            work_dir = Path(self._config_work_path).parent
+            log_f = work_dir / 'DLC_training.out'
+
         if not log_f.is_file():
             self.show_err_msg('No log file exists for the current config.')
             return
@@ -694,6 +705,79 @@ class DLCinter():
             except Exception as e:
                 print(e)
                 pass
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def batch_run_training(self, data_dir, overwrite=False):
+        # Select files marked by DLC
+        data_dir = Path(data_dir)
+        dlc_dirs = {}
+        for ff in data_dir.glob('*.mp4'):
+            dirs = list(data_dir.glob(f"{ff.stem}-DLCGUI-*-*-*"))
+            if len(dirs):
+                # check if it is ready for the training
+                for dd in dirs:
+                    conf_f = dd / 'config_rel.yaml'
+                    if not conf_f.is_file():
+                        continue
+
+                    label_f = dd / 'labeled-data' / ff.stem / \
+                        'CollectedData_DLCGUI.csv'
+                    if label_f.is_file():
+                        dlc_dirs[dd] = ff
+
+        # Make training scripts
+        script_fs = []
+        for dd, video_f in dlc_dirs.items():
+            res_fs = list(video_f.parent.glob(
+                f"{video_f.stem}DLC_*_{video_f.stem}*_filtered.csv"))
+            if len(res_fs) > 0 and not overwrite:
+                continue
+
+            conf_f = dd / 'config_rel.yaml'
+            self.train_network(
+                proc_type='prepare_script', analyze_videos=[video_f],
+                config_f=conf_f)
+
+            script_f = dd / 'DLC_training.sh'
+            if not script_f.is_file():
+                errmsg = f"Failed to create {script_f}"
+                self.show_err_msg(errmsg)
+                continue
+
+            script_fs.append(script_f)
+
+        # Create batch file
+        batch_f = data_dir / 'batch_DLC_training.sh'
+        batch_script = "#!/bin/bash\n\n"
+        batch_script += 'CWD=`pwd`\n\n'
+        batch_script += 'echo $CWD\n\n'
+        for f in script_fs:
+            batch_script += f"cd {f.parent.relative_to(data_dir)}\n"
+            batch_script += f"/bin/bash {f.name}\n"
+            batch_script += "cd $CWD\n\n"
+        with open(batch_f, 'w') as fd:
+            fd.write(batch_script)
+
+        # Run command
+        log_f = data_dir / 'batch_DLC_training.out'
+        conda_dir = Path.home() / 'anaconda3'
+        if not conda_dir.is_dir():
+            self.show_err_msg(f"Not found {conda_dir}")
+            return
+
+        conda_cmd = conda_dir / 'etc' / 'profile.d' / 'conda.sh'
+        subrun_cmd = f". {conda_cmd}; "
+        subrun_cmd += "conda activate TVT; "
+        subrun_cmd += f"nohup /bin/bash {batch_f.relative_to(data_dir)}"
+        subrun_cmd += f" > {log_f.relative_to(data_dir)} &"
+        subprocess.Popen(subrun_cmd, shell=True, cwd=data_dir,
+                         executable='/bin/bash')
+
+        msg = 'Training has started in the background.\n'
+        msg += f"Progress is written to {log_f}\n"
+        self.show_msg(msg)
+
+        self.show_training_progress(log_f=log_f)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def find_analysis_results(self, video_path, shuffle=1):
