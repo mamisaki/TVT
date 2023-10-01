@@ -585,6 +585,7 @@ class DLCinter():
         else:
             run_cmd = "/bin/bash"
 
+        # ---------------------------------------------------------------------
         if proc_type == 'prepare_script':
             msg = f"The process script is made as\n {script_f}\n\n"
             msg += "Run the script in a console"
@@ -637,10 +638,11 @@ class DLCinter():
                              stderr=open(log_f, 'w'), shell=True,
                              executable='/bin/bash')
 
-            self.show_training_progress()
             msg = 'Training has started in the background.\n'
             msg += f"Progress is written to {log_f}\n"
             self.show_msg(msg)
+
+            self.show_training_progress()
 
         elif proc_type == 'run_here':
             dlc.train_network(self._config_work_path)
