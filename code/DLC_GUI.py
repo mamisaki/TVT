@@ -1174,7 +1174,7 @@ class DLC_GUI(QObject):
             self.dlci.config_path = conf_file
 
         elif call == 'edit_config':
-            if not self.dlci.config_path.is_file():
+            if not Path(self.dlci.config_path).is_file():
                 return
 
             default_values = {}
@@ -1220,6 +1220,9 @@ class DLC_GUI(QObject):
 
         elif call == 'show_training_progress':
             self.dlci.show_training_progress()
+
+        elif call == 'kill_training_process':
+            self.dlci.kill_training_process()
 
         elif call == 'evaluate_network':
             self.dlci.evaluate_network()
@@ -2050,6 +2053,15 @@ class ViewWindow(QMainWindow):
             'Show the progress of the training running in the background.')
         action.triggered.connect(
             partial(self.model.dlc_call, 'show_training_progress'))
+        dlcMenu.addAction(action)
+
+        dlcMenu.addSeparator()
+
+        action = QAction('Kill training process', self)
+        action.setStatusTip(
+            'Show the progress of the training running in the background.')
+        action.triggered.connect(
+            partial(self.model.dlc_call, 'kill_training_process'))
         dlcMenu.addAction(action)
 
         dlcMenu.addSeparator()

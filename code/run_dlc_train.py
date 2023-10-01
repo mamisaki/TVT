@@ -8,25 +8,48 @@
 # %% import ===================================================================
 import os
 import re
-os.environ['MPLBACKEND'] = 'TKAgg'
-
-import deeplabcut as dlc
+import socket
+import unicodedata
 import argparse
 from pathlib import Path
 import yaml
 import io
 import platform
 
+os.environ['MPLBACKEND'] = 'TKAgg'
+
+import deeplabcut as dlc
+
+
+# %% =================================================================
+def slugify(value, allow_unicode=True):
+    """
+    Taken from
+    https://github.com/django/django/blob/master/django/utils/text.py
+    Convert to ASCII if 'allow_unicode' is False. Convert spaces or repeated
+    dashes to single dashes. Remove characters that aren't alphanumerics,
+    underscores, or hyphens. Convert to lowercase. Also strip leading and
+    trailing whitespace, dashes, and underscores.
+    """
+    value = str(value)
+    if allow_unicode:
+        value = unicodedata.normalize('NFKC', value)
+    else:
+        value = unicodedata.normalize('NFKD', value)
+        value = value.encode('ascii', 'ignore').decode('ascii')
+    value = re.sub(r'[^\w\s-]', '', value.lower())
+    return re.sub(r'[-\s]+', '-', value).strip('-_')
+
 
 # %% ==========================================================================
-def set_config(config_path0, APP_ROOT, HOSTNAME):
+def set_config(config_path0, DATA_ROOT, HOSTNAME):
     """Set config file (_config_path, _config_work_path) with converting
-    paths. Convert paths in config to a relative one from APP_ROOT or vice
+    paths. Convert paths in config to a relative one from DATA_ROOT or vice
     versa.
 
-    If the config includes ${APP_ROOT}, a config file with full-path
+    If the config includes ${DATA_ROOT}, a config file with full-path
     is created and set to self.config_work_path.
-    Otherwise, paths in the config are converted to relative to APP_ROOT,
+    Otherwise, paths in the config are converted to relative to DATA_ROOT,
     and a converted config is saved in a file to set in self.config_path.
     """
 
@@ -35,17 +58,17 @@ def set_config(config_path0, APP_ROOT, HOSTNAME):
         config_data = yaml.safe_load(stream)
 
     # Convert paths
-    if '${APP_ROOT}' in config_data['project_path']:
+    if '${DATA_ROOT}' in config_data['project_path']:
         # File with relative path is read.
         # convert to absolute path
         project_path = config_data['project_path']
-        project_path = project_path.replace('${APP_ROOT}/', '')
-        project_path = str((APP_ROOT / project_path).resolve())
+        project_path = project_path.replace('${DATA_ROOT}/', '')
+        project_path = str(DATA_ROOT / project_path)
 
         video_sets = {}
         for vf0 in config_data['video_sets'].keys():
-            vf = vf0.replace('${APP_ROOT}/', '')
-            vf = str((APP_ROOT / vf).resolve())
+            vf = vf0.replace('${DATA_ROOT}/', '')
+            vf = str(DATA_ROOT / vf)
             video_sets[vf] = config_data['video_sets'][vf0]
 
         config_data['project_path'] = project_path
@@ -69,6 +92,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run DLC train_network.')
     parser.add_argument('--config', help='DLC configuration file',
                         required=True)
+    parser.add_argument('--data_root')
     parser.add_argument('-c', '--create_training_dset', action='store_true',
                         default=False,
                         help='Run create_training_dataset')
@@ -89,6 +113,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     config_f = Path(args.config)
+    DATA_ROOT = args.data_root
     create_training_dset = args.create_training_dset
     shuffle = args.shuffle
     trainingsetindex = args.trainingsetindex
@@ -104,22 +129,24 @@ if __name__ == '__main__':
     filterpredictions = args.filterpredictions
 
     # --- Set config file -----------------------------------------------------
-    APP_ROOT = Path(__file__).absolute().parent.parent
-    if platform.system() == 'Windows':
-        HOSTNAME = platform.node()
-    else:
-        HOSTNAME = os.uname()[1]
-    if not config_f.stem.endswith(HOSTNAME):
-        config_f = set_config(config_f, APP_ROOT, HOSTNAME)
+    if DATA_ROOT is not None:
+        if platform.system() == 'Windows':
+            HOSTNAME = platform.node()
+        else:
+            HOSTNAME = slugify(socket.gethostname())
 
-    config_f = str(Path(config_f).absolute())
+        DATA_ROOT = Path(DATA_ROOT)
+        if not config_f.stem.endswith(HOSTNAME):
+            config_f = set_config(config_f, DATA_ROOT, HOSTNAME)
+
+    config_f = str(config_f.absolute())
 
     # --- Run -----------------------------------------------------------------
     print('+' * 70)
     print(f"Run dlc.train_network for config {config_f}\n")
 
     if create_training_dset:
-        dlc.create_training_dataset(str(config_f))
+        dlc.create_training_dataset(config_f)
 
     dlc.train_network(config_f, shuffle=shuffle,
                       trainingsetindex=trainingsetindex, gputouse=gputouse,

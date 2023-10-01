@@ -35,6 +35,7 @@ import numpy as np
 import deeplabcut as dlc
 from deeplabcut.utils import auxiliaryfunctions
 import yaml
+from PySide6.QtWidgets import QMessageBox
 
 
 # %% =================================================================
@@ -82,7 +83,8 @@ class DLCinter():
 
         self.ui_parent = ui_parent
 
-    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # ++
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def show_msg(self, msg):
         if self.ui_parent is not None:
             self.ui_parent.msg_dlg(msg)
@@ -550,54 +552,33 @@ class DLCinter():
         if not self.check_config_file():
             return
 
-        # --- Check running process -------------------------------------------
-        if self.OS == 'Windows':
-            cmd = 'tasklist | FIND "run_dlc_train.py"'
-            try:
-                out = subprocess.check_output(cmd, shell=True)
-                if len(out.decode().rstrip().split('\n')) > 1:
-                    errmsg = "Training process is running.\n"
-                    sys.stderr.write(errmsg)
-                    return
-            except Exception:
-                pass
-
-        else:
-            try:
-                out = subprocess.check_output('pgrep -f run_dlc_train.py',
-                                              shell=True)
-                if len(out.decode().rstrip().split('\n')) > 1:
-                    pid = out.decode().rstrip().split('\n')[0]
-                    msg = f"Training process is running as process {pid}.\n"
-                    msg += "You can kill it by 'pkill -f run_dlc_train' "
-                    msg += " in a console."
-                    self.show_msg(msg)
-                    return
-            except Exception:
-                pass
-
-        # --- Make training script --------------------------------------------
         work_dir = Path(self._config_work_path).parent
 
         # Update config_rel.yaml file
         self.set_config(self._config_work_path)
         conf_path = Path(self._config_path).name
 
+        # --- Write a training script -----------------------------------------
         cmd_path = Path.home() / 'TVT' / 'code' / 'run_dlc_train.py'
-        log_f = work_dir / 'DLC_train.out'
+        log_f = work_dir / 'DLC_training.out'
 
         if not cmd_path.is_file():
             self.show_err_msg(f'Not found {cmd_path}.')
             return
-        # cmd_path = os.path.relpath(cmd_path, work_dir)
+
         script_f = work_dir / 'DLC_training.sh'
-        cmd = f'python {cmd_path} --config {conf_path}'
-        cmd += " --evaluate_network"
+        cmd = f"python {cmd_path} --config {conf_path}"
+        cmd += f" --data_root '{self.DATA_ROOT}'"
+        cmd += "  --create_training_dset --evaluate_network"
         if len(analyze_videos):
             video_path = [str(Path(os.path.relpath(pp, work_dir)))
                           for pp in analyze_videos]
             cmd += f" --analyze_videos {' '.join(video_path)}"
             cmd += " --filterpredictions"
+
+        with open(script_f, 'w') as fd:
+            fd.write('#!/bin/bash\n')
+            fd.write(cmd)
 
         if self.OS == 'Windows':
             run_cmd = "bash.exe"
@@ -605,10 +586,6 @@ class DLCinter():
             run_cmd = "/bin/bash"
 
         if proc_type == 'prepare_script':
-            with open(script_f, 'w') as fd:
-                fd.write('#!/bin/bash\n')
-                fd.write(cmd)
-
             msg = f"The process script is made as\n {script_f}\n\n"
             msg += "Run the script in a console"
             msg += " by copy and paste the following lines;\n\n"
@@ -619,6 +596,33 @@ class DLCinter():
             self.show_msg(msg)
 
         elif proc_type == 'run_subprocess':
+            # --- Check running process ---
+            if self.OS == 'Windows':
+                cmd = 'tasklist | FIND "run_dlc_train.py"'
+                try:
+                    out = subprocess.check_output(cmd, shell=True)
+                    if len(out.decode().rstrip().split('\n')) > 1:
+                        errmsg = "Training process is running.\n"
+                        sys.stderr.write(errmsg)
+                        return
+                except Exception:
+                    pass
+
+            else:
+                try:
+                    out = subprocess.check_output(
+                        'pgrep -f run_dlc_train.py', shell=True)
+                    if len(out.decode().rstrip().split('\n')) > 1:
+                        pid = out.decode().rstrip().split('\n')[0]
+                        msg = f"Training process (pid={pid}) is running.\n"
+                        msg += "You can kill it by 'pkill -f run_dlc_train' "
+                        msg += " in a console."
+                        self.show_msg(msg)
+                        return
+                except Exception:
+                    pass
+
+            # Run command
             conda_dir = Path.home() / 'anaconda3'
             if not conda_dir.is_dir():
                 self.show_err_msg(f"Not found {conda_dir}")
@@ -628,7 +632,7 @@ class DLCinter():
             subrun_cmd = f". {conda_cmd}; "
             subrun_cmd += "conda activate TVT; "
             subrun_cmd += f"cd '{work_dir}'; "
-            subrun_cmd += f"{run_cmd} '{script_f}'"
+            subrun_cmd += f"{run_cmd} {script_f.relative_to(work_dir)}"
             subprocess.Popen(subrun_cmd, stdout=open(log_f, 'w'),
                              stderr=open(log_f, 'w'), shell=True,
                              executable='/bin/bash')
@@ -647,15 +651,46 @@ class DLCinter():
             return
 
         work_dir = Path(self._config_work_path).parent
-        log_f = work_dir / 'DLC_train.out'
+        log_f = work_dir / 'DLC_training.out'
         if not log_f.is_file():
             self.show_err_msg('No log file exists for the current config.')
             return
 
-        tail_cmd = f'tail -n 1000 -f {log_f}'
+        tail_cmd = f'tail -n 1000 -f "{log_f}"'
         if sys.platform == 'linux':
             cmd = f"gnome-terminal -- bash -c '{tail_cmd}'"
             subprocess.call(shlex.split(cmd))
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def kill_training_process(self):
+        # --- Check running process ---
+        if self.OS == 'Windows':
+            cmd = 'tasklist | FIND "run_dlc_train.py"'
+            try:
+                out = subprocess.check_output(cmd, shell=True)
+                if len(out.decode().rstrip().split('\n')) > 1:
+                    errmsg = "Training process is running.\n"
+                    sys.stderr.write(errmsg)
+                    return
+            except Exception:
+                pass
+
+        else:
+            try:
+                out = subprocess.check_output(
+                    'pgrep -f run_dlc_train.py', shell=True)
+                if len(out.decode().rstrip().split('\n')) > 1:
+                    pid = out.decode().rstrip().split('\n')[0]
+                    msg = f"Training process (pid={pid}) is running.\n"
+                    msg += "Do you want to kill the process?"
+                    ret = QMessageBox.question(
+                        None, "Kill training process", msg,
+                        QMessageBox.Yes | QMessageBox.No)
+                if ret == QMessageBox.Yes:
+                    subprocess.check_call(
+                        'pkill -f run_dlc_train.py', shell=True)
+            except Exception:
+                pass
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def find_analysis_results(self, video_path, shuffle=1):
