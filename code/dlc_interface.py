@@ -680,8 +680,8 @@ class DLCinter():
         else:
             try:
                 out = subprocess.check_output(
-                    'pgrep -f run_dlc_train.py', shell=True)
-                if len(out.decode().rstrip().split('\n')) > 1:
+                    shlex.split('pgrep -f run_dlc_train.py'))
+                if len(out.decode().rstrip()) > 0:
                     pid = out.decode().rstrip().split('\n')[0]
                     msg = f"Training process (pid={pid}) is running.\n"
                     msg += "Do you want to kill the process?"
@@ -690,8 +690,9 @@ class DLCinter():
                         QMessageBox.Yes | QMessageBox.No)
                 if ret == QMessageBox.Yes:
                     subprocess.check_call(
-                        'pkill -f run_dlc_train.py', shell=True)
-            except Exception:
+                        shlex.split('pkill -f run_dlc_train.py'))
+            except Exception as e:
+                print(e)
                 pass
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
