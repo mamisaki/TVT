@@ -1174,7 +1174,10 @@ class DLC_GUI(QObject):
             dirs = [str(dd) for dd in 
                     self.videoData.filename.parent.glob(video_name + '*')
                     if dd.is_dir()]
-            st_dir = sorted(dirs)[-1]
+            if len(dirs):
+                st_dir = sorted(dirs)[-1]
+            else:
+                st_dir = self.videoData.filename.parent
             conf_file, _ = QFileDialog.getOpenFileName(
                     self.main_win, "DLC config", str(st_dir),
                     "config yaml files (config_rel.yaml);;yaml (*.yaml)",
