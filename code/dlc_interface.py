@@ -574,6 +574,7 @@ class DLCinter():
             self.show_err_msg(f'Not found {cmd_path}.')
             return
 
+        cmd_path = str(cmd_path).replace(str(Path.home()), '$HOME')
         script_f = work_dir / 'DLC_training.sh'
         cmd = f"python {cmd_path} --config {conf_path}"
         cmd += f" --data_root '{self.DATA_ROOT}'"
