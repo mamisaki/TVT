@@ -569,16 +569,15 @@ class DLCinter():
             conf_path = Path(self._config_path).name
 
         # --- Write a training script -----------------------------------------
-        cmd_path = Path.home() / 'TVT' / 'code' / 'run_dlc_train.py'
+        cmd_path = Path(__file__).parent / 'run_dlc_train.py'
         if not cmd_path.is_file():
             self.show_err_msg(f'Not found {cmd_path}.')
             return
 
-        cmd_path = str(cmd_path).replace(str(Path.home()), '$HOME')
         script_f = work_dir / 'DLC_training.sh'
         cmd = f"python {cmd_path} --config {conf_path}"
         cmd += f" --data_root '{self.DATA_ROOT}'"
-        cmd += "  --create_training_dset --evaluate_network"
+        cmd += " --create_training_dset --evaluate_network"
         if len(analyze_videos):
             video_path = [str(Path(os.path.relpath(pp, work_dir)))
                           for pp in analyze_videos]
@@ -587,7 +586,7 @@ class DLCinter():
 
         with open(script_f, 'w') as fd:
             fd.write('#!/bin/bash\n')
-            fd.write(f'cd {work_dir}\n')
+            fd.write(f"cd {str(work_dir)}\n")
             fd.write(cmd)
 
         if self.OS == 'Windows':
