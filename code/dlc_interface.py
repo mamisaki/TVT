@@ -602,6 +602,7 @@ class DLCinter():
             msg += "Run the script in a console"
             msg += " by copy and paste the following lines;\n\n"
             msg += "conda activate TVT\n"
+            msg += f"cd {work_dir}\n"
             msg += f"nohup {run_cmd} {script_f.relative_to(work_dir)}"
             msg += f" > {log_f.relative_to(work_dir)} &"
             self.show_msg(msg)
