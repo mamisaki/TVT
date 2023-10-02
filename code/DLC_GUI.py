@@ -1170,7 +1170,11 @@ class DLC_GUI(QObject):
                                   work_dir, copy_videos)
 
         elif call == 'load_config':
-            st_dir = self.videoData.filename.parent
+            video_name = Path(self.videoData.filename).stem
+            dirs = [str(dd) for dd in 
+                    self.videoData.filename.parent.glob(video_name + '*')
+                    if dd.is_dir()]
+            st_dir = sorted(dirs)[-1]
             conf_file, _ = QFileDialog.getOpenFileName(
                     self.main_win, "DLC config", str(st_dir),
                     "config yaml files (config_rel.yaml);;yaml (*.yaml)",
