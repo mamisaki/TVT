@@ -103,7 +103,7 @@ if __name__ == '__main__':
     parser.add_argument('--gputouse', type=float, default=None)
     parser.add_argument('--max_snapshots_to_keep', type=int, default=5)
     parser.add_argument('--displayiters', type=int, default=1000)
-    parser.add_argument('--saveiters', type=int, default=20000)
+    parser.add_argument('--saveiters', type=int, default=50000)
     parser.add_argument('--maxiters', type=int, default=100000)
     parser.add_argument('--evaluate_network', action='store_true',
                         default=False)
