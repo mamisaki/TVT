@@ -50,7 +50,7 @@ import csv
 import cv2
 
 from matplotlib.figure import Figure
-from matplotlib.backends.backend_qtagg import FigureCanvas
+from matplotlib.backends.backend_qtagg import FigureCanvas, NavigationToolbar2QT
 
 from PySide6.QtCore import Qt, QObject, QTimer
 from PySide6.QtCore import Signal as pyqtSignal
@@ -1816,6 +1816,9 @@ class ViewWindow(QMainWindow):
         self.plot_marker_line = {}
         self.roi_plot_canvas.setEnabled(False)
 
+        # Create the navigation toolbar and add it to the layout
+        self.toolbar = NavigationToolbar2QT(self.roi_plot_canvas, self)
+
         # --- error label ---
         self.errorLabel = QLabel()
         self.errorLabel.setSizePolicy(QSizePolicy.Preferred,
@@ -1982,6 +1985,7 @@ class ViewWindow(QMainWindow):
 
         centWid.addWidget(upperFrame1)
         centWid.addWidget(self.roi_plot_canvas)
+        centWid.addWidget(self.toolbar)
         self.roi_plot_canvas.adjustSize()
         self.errorLabel.setFixedHeight(15)
         centWid.addWidget(self.errorLabel)
