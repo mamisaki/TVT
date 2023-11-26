@@ -180,17 +180,16 @@ if __name__ == '__main__':
         print('+' * 80)
         print(f"Run dlc.train_network for config {config_f}\n")
 
-        if create_training_dset:
-            dlc.create_training_dataset(config_f)
+    dlc.train_network(config_f, shuffle=shuffle, displayiters=displayiters,
+                      saveiters=saveiters, maxiters=maxiters)
 
-        dlc.train_network(config_f, shuffle=shuffle,
-                          trainingsetindex=trainingsetindex, gputouse=gputouse,
-                          max_snapshots_to_keep=max_snapshots_to_keep,
-                          displayiters=displayiters, saveiters=saveiters,
-                          maxiters=maxiters)
+    # dlc.train_network(config_f, shuffle=shuffle,
+    #                   trainingsetindex=trainingsetindex, gputouse=gputouse,
+    #                   max_snapshots_to_keep=max_snapshots_to_keep,
+    #                   displayiters=displayiters, saveiters=saveiters,
+    #                   maxiters=maxiters)
 
     if evaluate_network:
-        
         dlc.evaluate_network(config_f, plotting=False)
 
     if len(analyze_videos):
