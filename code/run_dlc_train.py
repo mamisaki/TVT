@@ -15,6 +15,8 @@ from pathlib import Path
 import yaml
 import io
 import platform
+import sys
+import time
 
 os.environ['MPLBACKEND'] = 'TKAgg'
 
@@ -110,7 +112,11 @@ if __name__ == '__main__':
     parser.add_argument('--analyze_videos', nargs='+')
     parser.add_argument('--filterpredictions', action='store_true',
                         default=False)
-
+    parser.add_argument('--block_process', action='store_true',
+                        default=False)
+    parser.add_argument('--overwrite', action='store_true',
+                        default=False)
+    
     args = parser.parse_args()
     config_f = Path(args.config)
     DATA_ROOT = args.data_root
@@ -127,34 +133,64 @@ if __name__ == '__main__':
     evaluate_network = args.evaluate_network
     analyze_videos = args.analyze_videos
     filterpredictions = args.filterpredictions
+    block_process = args.block_process
+    overwrite = args.overwrite
+
+    if platform.system() == 'Windows':
+        HOSTNAME = platform.node()
+    else:
+        HOSTNAME = slugify(socket.gethostname())
+
+    work_dir = config_f.parent
+    
+    # --- Block process -------------------------------------------------------
+    if block_process:
+        IsRun = work_dir / "IsRunning"
+        if IsRun.is_file():
+            with open(IsRun, 'r') as fd:
+                c = fd.read()
+            print(f'Process for {config_f.parent.name} is running on {c}')
+            sys.exit(0)
+
+        with open(IsRun, 'r') as fd:
+            fd.write(f"{HOSTNAME} ({time.ctime()})")
 
     # --- Set config file -----------------------------------------------------
     if DATA_ROOT is not None:
-        if platform.system() == 'Windows':
-            HOSTNAME = platform.node()
-        else:
-            HOSTNAME = slugify(socket.gethostname())
-
         DATA_ROOT = Path(DATA_ROOT)
         if not config_f.stem.endswith(HOSTNAME):
             config_f = set_config(config_f, DATA_ROOT, HOSTNAME)
 
     config_f = str(config_f.absolute())
 
-    # --- Run -----------------------------------------------------------------
-    print('+' * 70)
-    print(f"Run dlc.train_network for config {config_f}\n")
+    # --- Run training --------------------------------------------------------
+    res_exist = False
+    video_stem = '-'.join(work_dir.split('-')[:-4])
+    res_ds = list((work_dir / 'dlc-models').glob('iteration-*'))
+    if len(res_ds):
+        res_d = sorted(res_ds)[-1]
+        res_ds = list(res_d.glob(f"{video_stem}*shuffle{shuffle}"))
+        if len(res_ds):
+            res_d = sorted(res_ds)[-1] / 'train'
+            res_f = res_d / f"snapshot-{maxiters}.meta"
+            if res_f.is_file():
+                res_exist = True
 
-    if create_training_dset:
-        dlc.create_training_dataset(config_f)
+    if not res_exist:
+        print('+' * 80)
+        print(f"Run dlc.train_network for config {config_f}\n")
 
-    dlc.train_network(config_f, shuffle=shuffle,
-                      trainingsetindex=trainingsetindex, gputouse=gputouse,
-                      max_snapshots_to_keep=max_snapshots_to_keep,
-                      displayiters=displayiters, saveiters=saveiters,
-                      maxiters=maxiters)
+        if create_training_dset:
+            dlc.create_training_dataset(config_f)
+
+        dlc.train_network(config_f, shuffle=shuffle,
+                          trainingsetindex=trainingsetindex, gputouse=gputouse,
+                          max_snapshots_to_keep=max_snapshots_to_keep,
+                          displayiters=displayiters, saveiters=saveiters,
+                          maxiters=maxiters)
 
     if evaluate_network:
+        
         dlc.evaluate_network(config_f, plotting=False)
 
     if len(analyze_videos):
