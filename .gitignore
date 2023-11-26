@@ -9,3 +9,5 @@ config*
 data*
 stat*
 .DS_Store
+.github_token
+*.mp4
