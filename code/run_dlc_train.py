@@ -150,7 +150,7 @@ if __name__ == '__main__':
 
     dlc.train_network(config_f, shuffle=shuffle, displayiters=displayiters,
                       saveiters=saveiters, maxiters=maxiters)
-    
+
     # dlc.train_network(config_f, shuffle=shuffle,
     #                   trainingsetindex=trainingsetindex, gputouse=gputouse,
     #                   max_snapshots_to_keep=max_snapshots_to_keep,
