@@ -9,4 +9,3 @@ dependencies:
   - pip:
     - "deeplabcut[gui,tf]"
   - ffmpeg-python
-  - cudatoolkit

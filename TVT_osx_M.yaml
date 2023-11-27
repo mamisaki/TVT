@@ -1,0 +1,16 @@
+# TVT.yaml
+name: TVT
+channels:
+  - conda-forge
+  - apple
+dependencies:
+  - python=3.10
+  - pip
+  - hdf5
+  - wxpython
+  - tensorflow-deps
+  - pip:
+    - tensorflow-macos
+    - tensorflow-metal
+    - "deeplabcut[gui, tf]"
+  - ffmpeg-python

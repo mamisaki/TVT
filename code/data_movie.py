@@ -289,6 +289,10 @@ class DisplayImage(QLabel):
         self.frame_h = frame_h
         self.frameData = None
 
+        self.zoom_factor = 1.0
+        self.pan_start = QPoint(0, 0)
+        self.current_pan = QPoint(0, 0)
+
         self.tracking_mark = None
         # self.tracking_mark will be the reference to
         # self.parent.model.tracking_mark
@@ -296,6 +300,11 @@ class DisplayImage(QLabel):
         self.shift_scale_Mtx = None
 
         self.moving = None
+        self.panning = False
+        self.zoomc_imx = -1
+        self.zoomc_imy = -1
+        self.disp_x0 = 0
+        self.disp_y0 = 0
 
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.setStyleSheet("background:rgba(0, 0, 0, 255);")
@@ -368,44 +377,71 @@ class DisplayImage(QLabel):
         painter.end()
 
         pix = QPixmap.fromImage(qimg)
-        aspect = pix.width()/pix.height()
-        width1 = self.width()
-        height1 = self.height()
-        if width1 > height1 * aspect:
-            width1 = height1 * aspect
-        elif height1 > width1 / aspect:
-            height1 = width1 / aspect
+        # Apply zoom and pan transformations
+        if self.zoom_factor > 1:
+            # Crop
+            self.disp_x0 = max(int(np.round(self.zoomc_imx -
+                               (self.frame_w/2)/self.zoom_factor)), 0)
+            self.disp_y0 = max(int(np.round(self.zoomc_imy -
+                               (self.frame_h/2)/self.zoom_factor)), 0)
+            crop_w = min(int(np.round(self.frame_w / self.zoom_factor)),
+                         self.frame_w)
+            crop_h = min(int(np.round(self.frame_h / self.zoom_factor)),
+                         self.frame_h)
+            pix = pix.copy(self.disp_x0, self.disp_y0, crop_w, crop_h)
 
-        pix = pix.scaled(width1, height1, Qt.KeepAspectRatio)
+            self.zoomc_imx = int(np.round(crop_w / 2 + self.disp_x0))
+            self.zoomc_imy = int(np.round(crop_h / 2 + self.disp_y0))
+        else:
+            self.zoomc_imx = self.frame_w // 2
+            self.zoomc_imy = self.frame_h // 2
+            self.disp_x0 = 0
+            self.disp_y0 = 0
+
+        aspect = self.frame_w / self.frame_h
+        map_w = self.width()
+        map_h = self.height()
+        if map_w > map_h * aspect:
+            map_w = map_h * aspect
+        elif map_h > map_w / aspect:
+            map_h = map_w / aspect
+
+        pix = pix.scaled(map_w, map_h, Qt.KeepAspectRatio)
         self.setPixmap(pix)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def get_image_xy(self, px, py):
         """
-        pixmap is alighned to left in horizontal, middle in vertical.
+        translate display frame x, y to image position
         """
 
         if self.pixmap() is None:
             return
 
-        pixmap_w = self.pixmap().width()
-        pixmap_h = self.pixmap().height()
+        imageFrame_aspect = self.frame_w / self.frame_h
+        displayArea_aspect = self.width() / self.height()
 
-        # lab_w = self.width()
-        lab_h = self.height()
-        if lab_h > pixmap_h:
-            py -= (lab_h-pixmap_h)/2
+        if imageFrame_aspect > displayArea_aspect:
+            # height margin
+            disp2frame_scale = self.frame_w / self.width()
+            h_margin = (self.height() - (self.width() / imageFrame_aspect))/2
+            py -= h_margin
+        else:
+            # width margin
+            disp2frame_scale = self.frame_h / self.height()
 
-        x = np.round(px * self.frame_w/pixmap_w) - 0.5
-        y = np.round(py * self.frame_h/pixmap_h) - 0.5
+        x = np.round(px * disp2frame_scale) - 0.5
+        y = np.round(py * disp2frame_scale) - 0.5
         if self.shift_scale_Mtx is not None:
             invMtx = np.linalg.inv(self.shift_scale_Mtx)
             x, y = np.dot(invMtx, [x, y, 1])[:2]
-        x = int(x)
-        y = int(y)
 
-        if x < 0 or y < 0 or x >= self.frame_w or y >= self.frame_h:
-            return None
+        if self.zoom_factor > 1.0:
+            x = self.disp_x0 + x / self.zoom_factor
+            y = self.disp_y0 + y / self.zoom_factor
+
+        x = min(max(int(x), 0), self.frame_w-1)
+        y = min(max(int(y), 0), self.frame_h-1)
 
         return x, y
 
@@ -456,80 +492,101 @@ class DisplayImage(QLabel):
                 return
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def MouseClickEvent(self, e):
-        px = e.pos().x()
-        py = e.pos().y()
-        xy = self.get_image_xy(px, py)
-        if xy is None:
-            return
+    def MouseClickEvent(self, event):
+        px = event.pos().x()
+        py = event.pos().y()
+        im_x, im_y = self.get_image_xy(px, py)
+        print(im_x, im_y)
 
-        x, y = xy
-        self.point_mark_xy[0] = x
-        self.point_mark_xy[1] = y
+        if event.button() == Qt.LeftButton:
+            self.point_mark_xy[0] = im_x
+            self.point_mark_xy[1] = im_y
 
-        # Click on a tracking point?
-        for k in self.tracking_mark.keys():
-            dx = self.tracking_mark[k]['x']
-            dy = self.tracking_mark[k]['y']
-            rad = self.tracking_mark[k]['rad']
-            if np.abs(x-dx) <= rad and np.abs(y-dy) <= rad:
-                self.parent.model.select_point_ui_signal.emit(k)
-                break
-
-    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def mousePressEvent(self, e):
-        px = e.pos().x()
-        py = e.pos().y()
-        xy = self.get_image_xy(px, py)
-        if xy is None:
-            return
-
-        x, y = xy
-        self.point_mark_xy[0] = x
-        self.point_mark_xy[1] = y
-        self.parent.model.move_point_signal.emit()
-
-        # Click on point?
-        for point_name in self.tracking_mark.keys():
-            dx = self.tracking_mark[point_name]['x']
-            dy = self.tracking_mark[point_name]['y']
-            rad = self.tracking_mark[point_name]['rad']
-            if np.abs(x-dx) <= rad and np.abs(y-dy) <= rad:
-                self.moving = point_name
-                break
+            # Click on a tracking point?
+            for k in self.tracking_mark.keys():
+                dx = self.tracking_mark[k]['x']
+                dy = self.tracking_mark[k]['y']
+                rad = self.tracking_mark[k]['rad']
+                if np.abs(im_x-dx) <= rad and np.abs(im_y-dy) <= rad:
+                    self.parent.model.select_point_ui_signal.emit(k)
+                    break
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def mouseMoveEvent(self, e):
-        px = e.pos().x()
-        py = e.pos().y()
-        xy = self.get_image_xy(px, py)
-        if xy is None:
-            return
+    def mousePressEvent(self, event):
+        px = event.pos().x()
+        py = event.pos().y()
+        im_x, im_y = self.get_image_xy(px, py)
 
-        x, y = xy
+        if event.button() == Qt.LeftButton:
+            self.point_mark_xy[0] = im_x
+            self.point_mark_xy[1] = im_y
+            self.parent.model.move_point_signal.emit()
 
+            # Click on point?
+            for point_name in self.tracking_mark.keys():
+                dx = self.tracking_mark[point_name]['x']
+                dy = self.tracking_mark[point_name]['y']
+                rad = self.tracking_mark[point_name]['rad']
+                if np.abs(im_x-dx) <= rad and np.abs(im_y-dy) <= rad:
+                    self.moving = point_name
+                    break
+
+        elif event.button() == Qt.RightButton:
+            if self.moving is None:
+                if self.zoom_factor > 1.0:
+                    self.panning = True
+                    self.pan_start = event.pos()
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def mouseMoveEvent(self, event):
+        px = event.pos().x()
+        py = event.pos().y()
+        im_x, im_y = self.get_image_xy(px, py)
+
+        if event.buttons() & Qt.LeftButton:
+            self.point_mark_xy[0] = im_x
+            self.point_mark_xy[1] = im_y
+            if self.moving is not None:
+                self.tracking_mark[self.moving]['x'] = im_x
+                self.tracking_mark[self.moving]['y'] = im_y
+                self.parent.model.select_point_ui_signal.emit(self.moving)
+                self.parent.model.move_point_signal.emit()
+        elif event.buttons() & Qt.RightButton:
+            if self.panning:
+                self.current_pan = event.pos() - self.pan_start
+                self.zoomc_imx -= self.current_pan.x()
+                self.zoomc_imy -= self.current_pan.y()
+                self.pan_start = event.pos()
+                self.set_pixmap()
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def mouseReleaseEvent(self, event):
         if self.moving is not None:
-            self.tracking_mark[self.moving]['x'] = x
-            self.tracking_mark[self.moving]['y'] = y
-            self.parent.model.select_point_ui_signal.emit(self.moving)
+            px = event.pos().x()
+            py = event.pos().y()
+            im_x, im_y = self.get_image_xy(px, py)
 
-        self.point_mark_xy[0] = x
-        self.point_mark_xy[1] = y
-
-        self.parent.model.move_point_signal.emit()
-
-    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def mouseReleaseEvent(self, e):
-        if self.moving is not None:
-            px = e.pos().x()
-            py = e.pos().y()
-            x, y = self.get_image_xy(px, py)
-
-            self.tracking_mark[self.moving]['x'] = x
-            self.tracking_mark[self.moving]['y'] = y
+            self.tracking_mark[self.moving]['x'] = im_x
+            self.tracking_mark[self.moving]['y'] = im_y
             self.parent.model.edit_point_signal.emit(self.moving)
             self.parent.model.select_point_ui_signal.emit(self.moving)
             self.moving = None
+        elif self.panning:
+            self.panning = False
+            self.current_pan = QPoint(0, 0)
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def wheelEvent(self, event):
+        # Zoom in or out
+        zoom_frx = event.position().x()
+        zoom_fry = event.position().y()
+        self.zoomc_imx, self.zoomc_imy = \
+            self.get_image_xy(zoom_frx, zoom_fry)
+        num_degrees = event.angleDelta() / 8
+        num_steps = num_degrees / 30
+        self.zoom_factor *= 1.1 ** num_steps.y()
+        self.zoom_factor = max(1.0, self.zoom_factor)
+        self.set_pixmap()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def resizeEvent(self, evt):
