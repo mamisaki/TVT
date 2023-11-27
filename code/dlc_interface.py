@@ -837,14 +837,14 @@ class DLCinter():
             self.show_msg(iof.getvalue())
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def filterpredictions(self, video_path, TRACK_METHOD = "ellipse"):
+    def filterpredictions(self, video_path, TRACK_METHOD="ellipse"):
         if not self.check_config_file():
             return
 
         iof = io.StringIO()
         with redirect_stdout(iof):
             dlc.filterpredictions(
-                self._config_work_path, [str(video_path)], videotype='mp4', 
+                self._config_work_path, [str(video_path)], videotype='mp4',
                 track_method=TRACK_METHOD, save_as_csv=True)
 
         ostr = iof.getvalue()

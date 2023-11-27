@@ -116,7 +116,7 @@ if __name__ == '__main__':
                         default=False)
     parser.add_argument('--overwrite', action='store_true',
                         default=False)
-    
+
     args = parser.parse_args()
     config_f = Path(args.config)
     DATA_ROOT = args.data_root
@@ -142,7 +142,7 @@ if __name__ == '__main__':
         HOSTNAME = slugify(socket.gethostname())
 
     work_dir = config_f.parent
-    
+
     # --- Block process -------------------------------------------------------
     if block_process:
         IsRun = work_dir / "IsRunning"
