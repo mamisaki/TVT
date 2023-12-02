@@ -165,7 +165,7 @@ if __name__ == '__main__':
 
     # --- Run training --------------------------------------------------------
     res_exist = False
-    video_stem = '-'.join(work_dir.split('-')[:-4])
+    video_stem = '-'.join(str(work_dir).split('-')[:-4])
     res_ds = list((work_dir / 'dlc-models').glob('iteration-*'))
     if len(res_ds):
         res_d = sorted(res_ds)[-1]
