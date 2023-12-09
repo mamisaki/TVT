@@ -405,9 +405,13 @@ class ThermalDataMovie(DataMovie):
     def export_movie(self, fname=None):
         # --- Set saving filenamr ---------------------------------------------
         if fname is None:
-            fname = self.filename.parent / (self.filename.stem + '_thermo.mp4')
+            gray_fname = self.filename.parent / (self.filename.stem +  '_thermo_gray.mp4')
+            color_fname = self.filename.parent / (self.filename.stem +  '_thermo_color.mp4')
         else:
-            fname = Path(fname)
+            dst_dir = Path(fname).parent
+            fname = Path(fname).stem
+            gray_fname = dst_dir / (fname + '_gray.mp4')
+            color_fname = dst_dir / (fname + '_color.mp4')
 
         # --- Get frame data --------------------------------------------------
         frame_indices = np.arange(self.duration_frame, dtype=int)
@@ -430,18 +434,24 @@ class ThermalDataMovie(DataMovie):
             progressDlg.close()
             return None
 
-        # Get value range
-        progressDlg.setLabelText('Convert to gray image ...')
-        gray_data = np.empty_like(thermal_data_array, dtype=np.uint8)
+        progressDlg.setLabelText('Convert to image movie ...')
+
+        gray_img_data = np.empty_like(thermal_data_array, dtype=np.uint8)
+        color_img_data = np.empty([*thermal_data_array.shape, 3], dtype=np.uint8)    
         for ii, frame in enumerate(thermal_data_array):
             progressDlg.setValue(int(np.round(len(frame_indices) + ii*0.1)))
             progressDlg.repaint()
-            low, high = np.percentile(frame.ravel(), [10, 100])
+
+            # Scale frame-by-frame
+            low, high = np.percentile(frame.ravel(), [15, 99.9])
             gray_frame = (frame - low) / (high - low)
             gray_frame *= 255
             gray_frame[gray_frame < 0] = 0
             gray_frame[gray_frame > 255] = 255
-            gray_data[ii, :, :] = gray_frame.astype(np.uint8)
+
+            gray_img_data[ii, :, :] = gray_frame.astype(np.uint8)
+            color_frame = cv2.applyColorMap(255-gray_frame.astype(np.uint8), themro_cmap)
+            color_img_data[ii, :, :, :] = color_frame
 
         progressDlg.setValue(np.round(int(len(frame_indices)*1.1)))
         progressDlg.setLabelText('Save movie file ...')
@@ -457,7 +467,8 @@ class ThermalDataMovie(DataMovie):
         """
 
         # --- Save as movie file ----------------------------------------------
-        imageio.mimwrite(fname, gray_data, fps=self.frame_rate)
+        imageio.mimwrite(gray_fname, gray_img_data, fps=self.frame_rate)
+        imageio.mimwrite(color_fname, color_img_data, fps=self.frame_rate)
 
         """
         N_frames, h, w = thermal_data_array.shape
@@ -484,7 +495,7 @@ class ThermalDataMovie(DataMovie):
 
         progressDlg.close()
 
-        return fname
+        return gray_fname
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def show_frame(self, frame_idx=None, common_time_ms=None,
