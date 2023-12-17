@@ -248,13 +248,16 @@ class VideoDataMovie(DataMovie):
         super(VideoDataMovie, self).show_frame(
             frame_idx, common_time_ms, sync_update)
 
-        if self.model.main_win.plot_timeline is not None:
+        if self.model.main_win.plot_xvals is not None:
             xpos = self.model.main_win.plot_xvals[self.frame_position]
-            if self.model.main_win.plot_timeline.get_xdata()[0] != xpos:
-                if len(self.model.main_win.plot_line) == 0:
-                    self.model.main_win.plot_ax.set_ylim([0, 1])
-                self.model.main_win.plot_timeline.set_xdata([xpos, xpos])
-                self.model.main_win.roi_plot_canvas.draw()
+            for pp, tl in self.model.main_win.plot_timeline.items():
+                if tl.get_xdata()[0] != xpos:
+                    if pp not in self.model.main_win.plot_line or \
+                            len(self.model.main_win.plot_line[pp]) == 0:
+                        self.model.main_win.plot_ax[pp].set_ylim([0, 1])
+                    tl.set_xdata([xpos, xpos])
+
+        self.model.main_win.roi_plot_canvas.draw()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def get_frame_from_comtime(self, common_time_ms):
@@ -403,7 +406,7 @@ class DLC_GUI(QObject):
         self.main_win.tmark_grpbx.setEnabled(True)
         self.main_win.roi_ctrl_grpbx.setEnabled(True)
         self.main_win.roi_plot_canvas.setEnabled(True)
-        self.main_win.plot_ax.cla()
+        [ax.cla() for ax in self.main_win.plot_ax.values()]
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def unloadVideoData(self):
@@ -430,11 +433,11 @@ class DLC_GUI(QObject):
         self.main_win.tmark_grpbx.setEnabled(False)
         self.main_win.roi_ctrl_grpbx.setEnabled(False)
         self.main_win.roi_plot_canvas.setEnabled(False)
-        self.main_win.plot_ax.cla()
+        [ax.cla() for ax in self.main_win.plot_ax.values()]
 
         self.plot_xvals = None
         self.plot_line = {}
-        self.plot_timeline = None
+        self.plot_timeline = {}
         self.plot_marker_line = {}
 
     # --- Common movie control functions --------------------------------------
@@ -976,17 +979,17 @@ class DLC_GUI(QObject):
         if self.main_win.plot_xvals is None:
             xvals = np.arange(0, self.videoData.duration_frame)
             if len(xvals) == 0:
-                self.main_win.plot_ax.cla()
+                [ax.cla() for ax in self.main_win.plot_ax.values()]
                 self.main_win.plot_xvals = None
                 return
 
             xunit = 1.0 / self.videoData.frame_rate
             self.main_win.plot_xvals = xvals * xunit
             xvals = self.main_win.plot_xvals
-            self.main_win.plot_ax.set_xlim(xvals[0]-xunit, xvals[-1]+xunit)
 
             # Set xtick label
-            xticks = self.main_win.plot_ax.get_xticks()
+            tick_intv = max(np.round((xvals.max()/20) / 15) * 15, 15)
+            xticks = np.arange(0, xvals.max(), tick_intv)
             xtick_labs = []
             for xt in xticks:
                 if xt < 0:
@@ -998,22 +1001,28 @@ class DLC_GUI(QObject):
                     tstr = re.sub(r'\..+$', '', tstr)
                     xtick_labs.append(tstr)
 
-            self.main_win.plot_ax.set_xticks(xticks, xtick_labs)
-            self.main_win.plot_ax.set_xlim(xvals[0]-xunit, xvals[-1]+xunit)
+            self.main_win.plot_ax['x'].set_xticks(xticks, [])
+            self.main_win.plot_ax['y'].set_xticks(xticks, xtick_labs)
+            for ax in self.main_win.plot_ax.values():
+                ax.set_xlim(xvals[0]-xunit, xvals[-1]+xunit)
+            [self.main_win.plot_ax[pp].set_ylabel(pp) for pp in ('x', 'y')]
 
         # --- Time line -------------------------------------------------------
         xpos = self.main_win.plot_xvals[self.videoData.frame_position]
-        if self.main_win.plot_timeline is None:
-            self.main_win.plot_timeline = \
-                self.main_win.plot_ax.axvline(xpos, color='k', ls=':', lw=1)
-        else:
-            self.main_win.plot_timeline.set_xdata([xpos, xpos])
+        for pp in ('x', 'y'):
+            if pp not in self.main_win.plot_timeline:
+                self.main_win.plot_timeline[pp] = \
+                    self.main_win.plot_ax[pp].axvline(
+                        xpos, color='k', ls=':', lw=1)
+            else:
+                self.main_win.plot_timeline[pp].set_xdata([xpos, xpos])
 
         # --- Marker line -----------------------------------------------------
         for frame in self.time_marker.keys():
             tx = self.main_win.plot_xvals[frame]
             self.main_win.plot_marker_line[frame] = \
-                self.main_win.plot_ax.axvline(tx, color='r', lw=1)
+                [self.main_win.plot_ax[pp].axvline(tx, color='r', lw=1)
+                 for pp in ('x', 'y')]
 
         # Delete marker
         if hasattr(self.main_win, 'plot_marker_line'):
@@ -1021,8 +1030,9 @@ class DLC_GUI(QObject):
                 list(self.main_win.plot_marker_line.keys()),
                 list(self.time_marker.keys()))
             if len(rm_marker):
-                for rmfrm in rm_marker:
-                    self.main_win.plot_marker_line[rmfrm].remove()
+                for rmfrm in rm_marker: 
+                    for rmln in self.main_win.plot_marker_line[rmfrm]:
+                        [ln.remove() for ln in rmln]
                     del self.main_win.plot_marker_line[rmfrm]
 
         if not update_val:
@@ -1045,47 +1055,50 @@ class DLC_GUI(QObject):
 
         # Check point list update
         rm_lines = []
-        for line in self.main_win.plot_line.keys():
-            if '_'.join(line.split('_')[:-1]) not in all_points:
-                rm_lines.append(line)
+        if len(self.main_win.plot_line):
+            for line in self.main_win.plot_line['x'].keys():
+                if '_'.join(line.split('_')[:-1]) not in all_points:
+                    rm_lines.append(line)
 
         if len(rm_lines):
             for line in rm_lines:
-                self.main_win.plot_ax.lines.remove(
-                    self.main_win.plot_line[line])
-                del self.main_win.plot_line[line]
+                for pp in ('x', 'y'):
+                    # self.main_win.plot_ax[pp].lines.remove(
+                    #     self.main_win.plot_line[pp][line])
+                    del self.main_win.plot_line[pp][line]
 
         # -- Plot line --------------------------------------------------------
-        for point in Points:
-            col = pen_color_rgb[self.tracking_mark[point]['pen_color']]
-            if col == '#ffffff':  # white
-                col = '#0f0f0f'
+        for pp in ('x', 'y'):
+            for point in Points:
+                col = pen_color_rgb[self.tracking_mark[point]['pen_color']]
+                if col == '#ffffff':  # white
+                    col = '#0f0f0f'
 
-            for dd in ('x', 'y'):
-                plab = f"{point}_{dd}"
-                ls = {'x': '-', 'y': '--'}[dd]
-                val = getattr(self.tracking_point[point], dd)
-                if plab not in self.main_win.plot_line:
+                plab = f"{point}"
+                val = getattr(self.tracking_point[point], pp)
+                if pp not in self.main_win.plot_line:
+                    self.main_win.plot_line[pp] = {}
+                if plab not in self.main_win.plot_line[pp]:
                     # Create lines
-                    self.main_win.plot_line[plab] = \
-                        self.main_win.plot_ax.plot(
-                            self.main_win.plot_xvals, val, ls, color=col,
+                    self.main_win.plot_line[pp][plab] = \
+                        self.main_win.plot_ax[pp].plot(
+                            self.main_win.plot_xvals, val, '-', color=col,
                             label=plab)[0]
                 else:
-                    self.main_win.plot_line[plab].set_color(col)
-                    self.main_win.plot_line[plab].set_ls(ls)
-                    self.main_win.plot_line[plab].set_ydata(val)
+                    self.main_win.plot_line[pp][plab].set_color(col)
+                    self.main_win.plot_line[pp][plab].set_ls('-')
+                    self.main_win.plot_line[pp][plab].set_ydata(val)
 
-        self.main_win.plot_ax.relim()
-        self.main_win.plot_ax.autoscale_view()
+            self.main_win.plot_ax[pp].relim()
+            self.main_win.plot_ax[pp].autoscale_view()
 
         # -- legend --
-        if self.main_win.plot_ax.get_legend() is not None:
-            self.main_win.plot_ax.get_legend().remove()
+        if self.main_win.plot_ax['x'].get_legend() is not None:
+            self.main_win.plot_ax['x'].get_legend().remove()
 
-        if len(self.main_win.plot_line):
-            self.main_win.plot_ax.legend(bbox_to_anchor=(1.001, 1),
-                                         loc='upper left')
+        if len(self.main_win.plot_line['x']):
+            self.main_win.plot_ax['x'].legend(bbox_to_anchor=(1.001, 1),
+                                              loc='upper left')
 
         # -- draw --
         self.main_win.roi_plot_canvas.draw()
@@ -1807,13 +1820,16 @@ class ViewWindow(QMainWindow):
         self.roi_plot_canvas = FigureCanvas(Figure())
         self.roi_plot_canvas.setSizePolicy(QSizePolicy.Expanding,
                                            QSizePolicy.Expanding)
-        self.plot_ax = self.roi_plot_canvas.figure.subplots(1, 1)
+        self.plot_ax = {'xy'[ii]: ax
+                        for ii, ax in enumerate(
+                            self.roi_plot_canvas.figure.subplots(2, 1))}
+        [self.plot_ax[pp].set_ylabel(pp) for pp in ('x', 'y')]
         self.roi_plot_canvas.figure.subplots_adjust(
-                left=0.035, bottom=0.24, right=0.9, top=0.94)
+                left=0.05, bottom=0.24, right=0.9, top=0.94)
         self.roi_plot_canvas.start_event_loop(0.005)
         self.plot_xvals = None
         self.plot_line = {}
-        self.plot_timeline = None
+        self.plot_timeline = {}
         self.plot_marker_line = {}
         self.roi_plot_canvas.setEnabled(False)
 
