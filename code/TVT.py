@@ -23,7 +23,8 @@ View classe:
 # %% import ===================================================================
 from pathlib import Path, PurePath
 import sys
-from datetime import timedelta
+import os
+from datetime import datetime, timedelta
 import re
 from functools import partial
 import platform
@@ -56,7 +57,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QImage, QPixmap, QAction
 
 # https://matplotlib.org/3.1.0/gallery/user_interfaces/embedding_in_qt_sgskip.html
-from matplotlib.backends.backend_qtagg import FigureCanvas
+from matplotlib.backends.backend_qtagg import (FigureCanvas,
+                                               NavigationToolbar2QT)
 
 import imageio
 
@@ -97,7 +99,8 @@ themro_cmap = cv2.COLORMAP_JET
 
 if '__file__' not in locals():
     __file__ = './this.py'
-APP_ROOT = Path(__file__).parent.parent
+
+APP_ROOT = Path(__file__).absolute().parent.parent
 
 OS = platform.system()
 
@@ -126,7 +129,7 @@ class TrackingPoint():
     def set_position(self, x, y, frame_indices=None, update_frames=[]):
         if frame_indices is None:
             frame_indices = [self.dataMovie.frame_position]
-            if type(update_frames) == bool and update_frames:
+            if type(update_frames) is bool and update_frames:
                 update_frames = frame_indices
 
         self.x[frame_indices] = x
@@ -312,6 +315,7 @@ class ThermalDataMovie(DataMovie):
         super(ThermalDataMovie, self).__init__(parent, dispImg, UI_objs)
         self.extract_temp_file = extract_temp_file
         self.thermal_data_reader = None
+        self.file_path = None
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def open(self, filename):
@@ -319,6 +323,7 @@ class ThermalDataMovie(DataMovie):
             self.unload()
 
         filename = Path(filename)
+        self.file_path = filename
         self.thermal_data_reader = None
 
         if filename.suffix == '.csq':
@@ -405,8 +410,10 @@ class ThermalDataMovie(DataMovie):
     def export_movie(self, fname=None):
         # --- Set saving filenamr ---------------------------------------------
         if fname is None:
-            gray_fname = self.filename.parent / (self.filename.stem +  '_thermo_gray.mp4')
-            color_fname = self.filename.parent / (self.filename.stem +  '_thermo_color.mp4')
+            gray_fname = self.filename.parent / (self.filename.stem +
+                                                 '_thermo_gray.mp4')
+            color_fname = self.filename.parent / (self.filename.stem +
+                                                  '_thermo_color.mp4')
         else:
             dst_dir = Path(fname).parent
             fname = Path(fname).stem
@@ -437,7 +444,8 @@ class ThermalDataMovie(DataMovie):
         progressDlg.setLabelText('Convert to image movie ...')
 
         gray_img_data = np.empty_like(thermal_data_array, dtype=np.uint8)
-        color_img_data = np.empty([*thermal_data_array.shape, 3], dtype=np.uint8)    
+        color_img_data = np.empty([*thermal_data_array.shape, 3],
+                                  dtype=np.uint8)
         for ii, frame in enumerate(thermal_data_array):
             progressDlg.setValue(int(np.round(len(frame_indices) + ii*0.1)))
             progressDlg.repaint()
@@ -450,7 +458,8 @@ class ThermalDataMovie(DataMovie):
             gray_frame[gray_frame > 255] = 255
 
             gray_img_data[ii, :, :] = gray_frame.astype(np.uint8)
-            color_frame = cv2.applyColorMap(255-gray_frame.astype(np.uint8), themro_cmap)
+            color_frame = cv2.applyColorMap(255-gray_frame.astype(np.uint8),
+                                            themro_cmap)
             color_img_data[ii, :, :, :] = color_frame
 
         progressDlg.setValue(np.round(int(len(frame_indices)*1.1)))
@@ -646,7 +655,8 @@ class ThermalVideoModel(QObject):
     edit_point_signal = pyqtSignal(str)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def __init__(self, main_win, batchmode=False, extract_temp_file=None):
+    def __init__(self, main_win, batchmode=False, extract_temp_file=None,
+                 save_interval=10):
         super(ThermalVideoModel, self).__init__(parent=main_win)
 
         # main_win object
@@ -743,15 +753,15 @@ class ThermalVideoModel(QObject):
         self.loaded_state_f = None
         self.tmp_state_f = APP_ROOT / 'config' / 'tmp_working_state.pkl'
         self.num_saved_setting_hist = 5
-        last_state_f = APP_ROOT / 'config' / 'last_working_state-0.pkl'
+        last_state_f = APP_ROOT / 'config' / 'TVT_last_working_state-0.pkl'
         if not last_state_f.parent.is_dir():
-            last_state_f.parent.mkdir()
+            os.makedirs(last_state_f.parent)
 
         if not batchmode:
             self.save_timer = QTimer()
             self.save_timer.setSingleShot(True)
             self.save_timer.timeout.connect(self.save_tmp_status)
-            self.save_tmp_wait = 60  # seconds
+            self.save_tmp_wait = save_interval  # seconds
             self.save_timer.start(self.save_tmp_wait * 1000)
 
             if self.tmp_state_f.is_file():
@@ -916,9 +926,25 @@ class ThermalVideoModel(QObject):
 
         fileName = Path(fileName)
 
+        if not str(fileName.absolute()).startswith(
+                str(self.DATA_ROOT.absolute())):
+            # the data file is not in the DATA_ROOT
+            msgBox = QMessageBox()
+            msgBox.setText(
+                f"The video file is not located under {self.DATA_ROOT}."
+                f" Would you like to copy it there ({self.DATA_ROOT})?")
+            msgBox.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            msgBox.setDefaultButton(QMessageBox.Yes)
+            ret = msgBox.exec()
+            if ret == QMessageBox.Yes:
+                destination = self.DATA_ROOT / fileName.name
+                shutil.copy(fileName, destination)
+                fileName = destination  # Update filePath to the new location
+
         self.videoData.open(fileName)
         self.main_win.unloadVideoDataBtn.setText(
             f"Unload {Path(fileName).name}")
+
         self.main_win.unloadVideoDataBtn.setEnabled(True)
 
         # Sync video to thermo if framerate and number of frames are same
@@ -1103,7 +1129,7 @@ class ThermalVideoModel(QObject):
     # --- Tracking point click callbacks --------------------------------------
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def set_editRange(self, selectIdx):
-        edRngs = ['current', 'Mark<', '<Mark', '0<', '>End', 'all']
+        edRngs = ['current', 'Mark<', '<Mark', '0<', '>End']
         self.editRange = edRngs[selectIdx]
 
         if selectIdx != self.main_win.roi_editRange_cmbbx.currentIndex():
@@ -1442,9 +1468,6 @@ class ThermalVideoModel(QObject):
         elif self.editRange == '>End':
             fromFrame = frame+1  # Not include the current frame
             frame_indices = np.arange(fromFrame, Nframes)
-
-        elif self.editRange == 'all':
-            frame_indices = np.arange(0, Nframes)
 
         self.tracking_point[point_name].set_position(
                 np.nan, np.nan, frame_indices=frame_indices,
@@ -1960,6 +1983,11 @@ class ThermalVideoModel(QObject):
     # --- DeepLabCut interface ------------------------------------------------
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def dlc_call(self, call, opt=None):
+        if call != 'batch_run_training':
+            # Check if the video is loaded
+            if not hasattr(self, 'videoData') or not self.videoData.loaded:
+                self.main_win.error_MessageBox("No video data is loaded.")
+                return
 
         # Check if the video is loaded
         if not hasattr(self, 'videoData') or not self.videoData.loaded:
@@ -1984,7 +2012,14 @@ class ThermalVideoModel(QObject):
                                   work_dir, copy_videos)
 
         elif call == 'load_config':
-            st_dir = self.videoData.filename.parent
+            video_name = Path(self.videoData.filename).stem
+            dirs = [str(dd) for dd in
+                    self.videoData.filename.parent.glob(video_name + '*')
+                    if dd.is_dir()]
+            if len(dirs):
+                st_dir = sorted(dirs)[-1]
+            else:
+                st_dir = self.videoData.filename.parent
             conf_file, _ = QFileDialog.getOpenFileName(
                     self.main_win, "DLC config", str(st_dir),
                     "config yaml files (config_rel.yaml);;yaml (*.yaml)",
@@ -1996,9 +2031,15 @@ class ThermalVideoModel(QObject):
             self.dlci.config_path = conf_file
 
         elif call == 'edit_config':
-            self.dlci.edit_config(
-                self.main_win.ui_edit_config)
-            # default_values={'bodyparts': ['LEYE', 'REYE']})
+            if self.dlci.config_path is None or \
+                    not Path(self.dlci.config_path).is_file():
+                return
+
+            default_values = {}
+            # default_values = {'bodyparts': ['LEYE', 'MID', 'REYE', 'NOSE'],
+            #                   'dotsize': 6}
+            self.dlci.edit_config(self.main_win.ui_edit_config,
+                                  default_values=default_values)
 
         elif call == 'extract_frames':
             # Wait message box
@@ -2012,13 +2053,6 @@ class ThermalVideoModel(QObject):
             msgBox.close()
 
         elif call == 'label_frames':
-            # Save the current status because DLC's GUI window may kill the
-            # process at exit.
-            fname = APP_ROOT / 'config' / 'last_working_state-0.pkl'
-            if not fname.parent.is_dir():
-                fname.parent.mkdir()
-            self.save_status(fname=fname)
-
             self.dlci.label_frames(edit_gui_fn=self.main_win.ui_edit_config)
 
         elif call == 'check_labels':
@@ -2041,6 +2075,12 @@ class ThermalVideoModel(QObject):
         elif call == 'train_network':
             self.dlci.train_network(proc_type=opt,
                                     analyze_videos=[self.videoData.filename])
+
+        elif call == 'show_training_progress':
+            self.dlci.show_training_progress()
+
+        elif call == 'kill_training_process':
+            self.dlci.kill_training_process()
 
         elif call == 'evaluate_network':
             self.dlci.evaluate_network()
@@ -2070,10 +2110,6 @@ class ThermalVideoModel(QObject):
                 for ff in res_fs:
                     ff.unlink()
 
-            config_data = self.dlci.get_config()
-            if config_data['snapshotindex'] == -1:
-                self.dlci.edit_config(edit_keys=['snapshotindex'])
-
             self.dlci.analyze_videos(self.videoData.filename)
 
         elif call == 'filterpredictions':
@@ -2090,16 +2126,34 @@ class ThermalVideoModel(QObject):
             self.dlci.extract_outlier_frames(self.videoData.filename)
 
         elif call == 'refine_labels':
-            # Save working setting
-            fname = APP_ROOT / 'config' / 'last_working_state-0.pkl'
-            if not fname.parent.is_dir():
-                fname.parent.mkdir()
-            self.save_status(fname=fname)
-
             self.dlci.refine_labels()
 
         elif call == 'merge_datasets':
             self.dlci.merge_datasets()
+
+        elif call == 'boot_dlc_gui':
+            self.dlci.boot_dlc_gui()
+
+        elif call == 'batch_run_training':
+            # Select data directry
+            if self.DATA_ROOT.is_dir():
+                stdir = self.DATA_ROOT.parent
+            else:
+                stdir = APP_ROOT
+            data_dir = QFileDialog.getExistingDirectory(
+                self.main_win, "Select data directory",
+                str(stdir), QFileDialog.ShowDirsOnly)
+            if data_dir == '':
+                return
+
+            # Ask if overwrite
+            ret = QMessageBox.question(
+                self.main_win, "Batch run",
+                "Overwrite (re-train) the existing results?",
+                QMessageBox.No | QMessageBox.Yes)
+            overwrite = (ret == QMessageBox.Yes)
+
+            self.dlci.batch_run_training(data_dir, overwrite)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def load_tracking(self, fileName=None, lh_thresh=None, **kwargs):
@@ -2280,7 +2334,12 @@ class ThermalVideoModel(QObject):
     def save_status(self, fname=None, **kwargs):
         # --- Filename setup ---
         if fname is None:
-            stdir = APP_ROOT
+            stdir = self.DATA_ROOT / 'work_state'
+            video_name = self.videoData.file_path.stem
+            if video_name is not None:
+                dtstr = datetime.now().strftime("%Y%m%d%H%M")
+                stdir = stdir / f"{video_name}_working_state_{dtstr}.pkl"
+
             if self.loaded_state_f is not None:
                 stdir = self.loaded_state_f
 
@@ -2298,8 +2357,7 @@ class ThermalVideoModel(QObject):
             self.loaded_state_f = fname
         else:
             if not fname.parent.is_dir():
-                self.main_win.error_MessageBox(f"Not found {fname.parent}.")
-                return
+                os.makedirs(fname.parent)
 
         # --- Extract saving parameter values for the model object ---
         settings = {}
@@ -2393,9 +2451,9 @@ class ThermalVideoModel(QObject):
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def load_status(self, fname=None, **kwargs):
         if fname is None:
-            stdir = APP_ROOT
+            stdir = self.DATA_ROOT / 'work_state'
             fname, _ = QFileDialog.getOpenFileName(
-                self.main_win, "Open setting file", str(stdir),
+                self.main_win, "Open state file", str(stdir),
                 "pickle (*.pkl)", None, QFileDialog.DontUseNativeDialog)
             if fname == '':
                 return
@@ -2403,8 +2461,8 @@ class ThermalVideoModel(QObject):
         with open(fname, 'rb') as fd:
             settings = pickle.load(fd)
 
-        if fname != self.tmp_state_f and \
-                fname != APP_ROOT / 'config' / 'last_working_state-0.pkl':
+        if fname != APP_ROOT / 'config' / \
+                'TVT_last_working_state-0.pkl':
             self.loaded_state_f = Path(fname)
 
         # Load DATA_ROOT
@@ -2475,15 +2533,6 @@ class ThermalVideoModel(QObject):
             self.sync_video_thermal(settings['on_sync'])
             del settings['on_sync']
 
-        # Load DLC config
-        if 'dlci' in settings:
-            dlci_conf_path = self.DATA_ROOT / settings['dlci']['_config_path']
-            if not dlci_conf_path.is_file():
-                self.dlc_call('load_config')
-            else:
-                self.dlci.config_path = dlci_conf_path
-            del settings['dlci']
-
         # Load time_marker
         if 'time_marker' in settings:
             if self.thermalData.loaded or self.videoData.loaded:
@@ -2496,6 +2545,12 @@ class ThermalVideoModel(QObject):
 
                 self.show_marker()
             del settings['time_marker']
+
+        # Load DLC config
+        if 'dlci' in settings:
+            self.dlci.config_path = self.DATA_ROOT / \
+                settings['dlci']['_config_path']
+            del settings['dlci']
 
         # Load tracking_point
         if 'tracking_point' in settings:
@@ -2554,9 +2609,15 @@ class ThermalVideoModel(QObject):
         gc.collect()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def save_tmp_status(self):
-        self.save_status(fname=self.tmp_state_f)
-        self.save_timer.start(self.save_tmp_wait * 1000)
+    def save_tmp_status(self, timer=True):
+        if self.thermalData.file_path is not None:
+            video_name = self.thermalData.file_path.stem
+            save_f = self.DATA_ROOT / 'work_state' / \
+                f"{video_name}_working_state.pkl"
+            self.save_status(fname=save_f)
+
+        if timer:
+            self.save_timer.start(self.save_tmp_wait * 1000)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def set_data_root(self, data_dir=None):
@@ -2573,6 +2634,10 @@ class ThermalVideoModel(QObject):
 
         self.DATA_ROOT = Path(data_dir)
         self.dlci.DATA_ROOT = self.DATA_ROOT
+
+        conf = {'DATA_ROOT': str(self.DATA_ROOT)}
+        with open(self.conf_f, 'w') as fd:
+            json.dump(conf, fd)
 
 
 # %% View class : MainWindow ==================================================
@@ -2824,7 +2889,8 @@ class MainWindow(QMainWindow):
         self.roi_online_plot_chbx = QCheckBox('Online plot')
         self.roi_online_plot_chbx.setChecked(True)
         self.roi_plot_btn = QPushButton('Plot all')
-
+        self.roi_plot_btn.setStyleSheet("background:#7fbfff; color:black;")
+        
         # self.roi_LPF_lb = QLabel('Low-pass filter (Hz)')
         # self.roi_LPF_thresh_spbx = QDoubleSpinBox()
         # self.roi_LPF_thresh_spbx.setDecimals(5)
@@ -2857,6 +2923,14 @@ class MainWindow(QMainWindow):
         self.plot_timeline = None
         self.plot_marker_line = {}
         self.roi_plot_canvas.setEnabled(False)
+
+        # Create the navigation toolbar and add it to the layout
+        self.toolbar = NavigationToolbar2QT(self.roi_plot_canvas, self)
+
+        # --- error label ---
+        self.errorLabel = QLabel()
+        self.errorLabel.setSizePolicy(QSizePolicy.Preferred,
+                                      QSizePolicy.Maximum)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def connect_signal_handlers(self):
@@ -3102,8 +3176,11 @@ class MainWindow(QMainWindow):
 
         # --- Add roi_plot_canvas ---
         centWid.addWidget(self.roi_plot_canvas)
+        centWid.addWidget(self.toolbar)
+        self.roi_plot_canvas.adjustSize()
+        self.errorLabel.setFixedHeight(15)
+        centWid.addWidget(self.errorLabel)
 
-        # self.roi_plot_canvas.setFixedHeight(100)
         self.setCentralWidget(centWid)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -3154,7 +3231,9 @@ class MainWindow(QMainWindow):
         action.triggered.connect(partial(self.model.dlc_call, 'new_project'))
         dlcMenu.addAction(action)
 
-        action = QAction('- Load config', self)
+        dlcMenu.addSeparator()
+
+        action = QAction('Load config', self)
         action.setStatusTip('Load existing DeepLabCut configuraton')
         action.triggered.connect(partial(self.model.dlc_call, 'load_config'))
         dlcMenu.addAction(action)
@@ -3165,109 +3244,15 @@ class MainWindow(QMainWindow):
         action.triggered.connect(partial(self.model.dlc_call, 'edit_config'))
         dlcMenu.addAction(action)
 
-        # # -- III --
-        # action = QAction('Extract training frames', self)
-        # action.setStatusTip('Extract frames for DeepLabCut training')
-        # action.triggered.connect(partial(self.model.dlc_call,
-        #                                  'extract_frames'))
-        # dlcMenu.addAction(action)
-
-        # # -- IV --
-        # action = QAction('Label frames', self)
-        # action.setStatusTip('Label frames for DeepLabCut training')
-        # action.triggered.connect(partial(self.model.dlc_call,
-        # 'label_frames'))
-        # dlcMenu.addAction(action)
-
-        # # -- V --
-        # action = QAction('Check labels', self)
-        # action.setStatusTip('Check labels for DeepLabCut training')
-        # action.triggered.connect(partial(self.model.dlc_call,
-        # 'check_labels'))
-        # dlcMenu.addAction(action)
-
-        # # -- VI, VII --
-        # action = QAction('Train network', self)
-        # action.setStatusTip('Create training dataset and '
-        #                     'train DeepLabCut training')
-        # action.setStatusTip('Train DeepLabCut network')
-        # action.triggered.connect(partial(self.model.dlc_call,
-        #                                  'train_network', 'run_subprocess'))
-        # dlcMenu.addAction(action)
-
-        """
-        # -- VIII --
-        action = QAction('VIII. Evaluate network', self)
-        action.setStatusTip('Evaluate network of DeepLabCut')
-        action.triggered.connect(partial(self.model.dlc_call,
-                                         'evaluate_network'))
-        dlcMenu.addAction(action)
-        """
-
-        # -- IX --
-        # action = QAction('- Analyze video', self)
-        # action.setStatusTip('Analyze video by DeepLabCut')
-        # action.triggered.connect(partial(self.model.dlc_call,
-        #                                  'analyze_videos'))
-        # dlcMenu.addAction(action)
-
-        # action = QAction('- Filter prediction', self)
-        # action.setStatusTip('Filter prediction by DeepLabCut')
-        # action.triggered.connect(
-        #         partial(self.model.dlc_call, 'filterpredictions'))
-        # dlcMenu.addAction(action)
-
-        """
-        action = QAction('- Plot trajectories', self)
-        action.setStatusTip('Plot trajectories by DeepLabCut')
-        action.triggered.connect(
-                partial(self.model.dlc_call, 'plot_trajectories', False))
-        dlcMenu.addAction(action)
-
-        action = QAction('- Plot filtered trajectories', self)
-        action.setStatusTip('Plot flitered trajectories by DeepLabCut')
-        action.triggered.connect(
-                partial(self.model.dlc_call, 'plot_trajectories', True))
-        dlcMenu.addAction(action)
-        """
-
-        # action = QAction('- Create labeled video', self)
-        # action.setStatusTip('Create labeled video by DeepLabCut')
-        # action.triggered.connect(
-        #         partial(self.model.dlc_call, 'create_labeled_video', False))
-        # dlcMenu.addAction(action)
-
-        # action = QAction('- Create labeled video (filtered)', self)
-        # action.setStatusTip(
-        #         'Create labeled video with SARIMAX filtering by DeepLabCut')
-        # action.triggered.connect(
-        #         partial(self.model.dlc_call, 'create_labeled_video', True))
-        # dlcMenu.addAction(action)
-
-        # # -- X --
-        # action = QAction('Extract outlier frames', self)
-        # action.setStatusTip('Extract outlier frames by DeepLabCut')
-        # action.triggered.connect(partial(self.model.dlc_call,
-        #                                  'extract_outlier_frames'))
-        # dlcMenu.addAction(action)
-
-        # action = QAction('- Refine labels', self)
-        # action.setStatusTip('Refine labels by DeepLabCut')
-        # action.triggered.connect(partial(self.model.dlc_call,
-        # 'refine_labels'))
-        # dlcMenu.addAction(action)
-
-        # action = QAction('- Merge datasets', self)
-        # action.setStatusTip('Merge datasets by DeepLabCut')
-        # action.triggered.connect(partial(self.model.dlc_call,
-        #                                  'merge_datasets'))
-        # dlcMenu.addAction(action)
+        dlcMenu.addSeparator()
 
         # -- Boot deeplabcut GUI ---
         action = QAction('deeplabcut GUI', self)
         action.setStatusTip('Boot deeplabcut GUI application')
         action.triggered.connect(partial(self.model.dlc_call, 'boot_dlc_gui'))
         dlcMenu.addAction(action)
+
+        dlcMenu.addSeparator()
 
         action = QAction('Make a training script', self)
         action.setStatusTip(
@@ -3276,11 +3261,59 @@ class MainWindow(QMainWindow):
                                          'train_network', 'prepare_script'))
         dlcMenu.addAction(action)
 
+        action = QAction('Run training backgroud', self)
+        action.setStatusTip(
+            'Create a command script for DeepLabCut network training and run' +
+            ' it in the background')
+        action.triggered.connect(partial(self.model.dlc_call,
+                                         'train_network', 'run_subprocess'))
+        dlcMenu.addAction(action)
+
+        action = QAction('Show training progress', self)
+        action.setStatusTip(
+            'Show the progress of the training running in the background.')
+        action.triggered.connect(
+            partial(self.model.dlc_call, 'show_training_progress'))
+        dlcMenu.addAction(action)
+
+        dlcMenu.addSeparator()
+
+        action = QAction('Kill training process', self)
+        action.setStatusTip(
+            'Show the progress of the training running in the background.')
+        action.triggered.connect(
+            partial(self.model.dlc_call, 'kill_training_process'))
+        dlcMenu.addAction(action)
+
+        dlcMenu.addSeparator()
+
+        action = QAction('Analyze video', self)
+        action.setStatusTip('Analyze video by DeepLabCut')
+        action.triggered.connect(partial(self.model.dlc_call,
+                                         'analyze_videos'))
+        dlcMenu.addAction(action)
+
+        action = QAction('Filter prediction', self)
+        action.setStatusTip('Filter prediction by DeepLabCut')
+        action.triggered.connect(
+                partial(self.model.dlc_call, 'filterpredictions'))
+        dlcMenu.addAction(action)
+
+        dlcMenu.addSeparator()
+
+        action = QAction('Run all training scripts in batch mode', self)
+        action.setStatusTip(
+            'Run all training scripts in a data directory sequentially.')
+        action.triggered.connect(partial(self.model.dlc_call,
+                                         'batch_run_training'))
+        dlcMenu.addAction(action)
+
+        dlcMenu.addSeparator()
+
         # -- XI --
         action = QAction('Load tracking positions', self)
         action.setStatusTip('Load positions tracked by DeepLabCut')
-        action.triggered.connect(
-            partial(self.model.load_tracking, fileName=None))
+        action.triggered.connect(self.model.load_tracking)
         dlcMenu.addAction(action)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -3425,27 +3458,19 @@ class MainWindow(QMainWindow):
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def exitCall(self):
         self.close()
+        sys.exit(app.exec_())
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def closeEvent(self, event):
         if self.model.thermalData.loaded or self.model.videoData.loaded:
             # Save working setting
-            fname = APP_ROOT / 'config' / 'last_working_state-0.pkl'
+            fname = APP_ROOT / 'config' / 'TVT_last_working_state-0.pkl'
             if not fname.parent.is_dir():
                 fname.parent.mkdir()
 
             self.model.shift_save_setting_fname(fname)
             self.model.save_status(fname)
-
-            # Copy the state file to data root
-            if self.model.thermalData.loaded:
-                data_dir = self.model.thermalData.filename.parent
-            else:
-                data_dir = self.model.videoData.filename.parent
-            shutil.copy(fname, data_dir / fname.name)
-
-        if self.model.tmp_state_f.is_file():
-            self.model.tmp_state_f.unlink()
+            self.model.save_tmp_status(timer=False)
 
         if self.model.CONF_DIR.is_dir():
             for rmf in self.model.CONF_DIR.glob('*.fff'):
