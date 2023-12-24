@@ -1030,7 +1030,7 @@ class DLC_GUI(QObject):
                 list(self.main_win.plot_marker_line.keys()),
                 list(self.time_marker.keys()))
             if len(rm_marker):
-                for rmfrm in rm_marker: 
+                for rmfrm in rm_marker:
                     for rmln in self.main_win.plot_marker_line[rmfrm]:
                         [ln.remove() for ln in rmln]
                     del self.main_win.plot_marker_line[rmfrm]
