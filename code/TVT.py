@@ -2890,7 +2890,7 @@ class MainWindow(QMainWindow):
         self.roi_online_plot_chbx.setChecked(True)
         self.roi_plot_btn = QPushButton('Plot all')
         self.roi_plot_btn.setStyleSheet("background:#7fbfff; color:black;")
-        
+
         # self.roi_LPF_lb = QLabel('Low-pass filter (Hz)')
         # self.roi_LPF_thresh_spbx = QDoubleSpinBox()
         # self.roi_LPF_thresh_spbx.setDecimals(5)
