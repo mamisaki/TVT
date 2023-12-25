@@ -63,10 +63,7 @@ class DataMovie():
         self.filename = Path(filename)
         duration_t = timedelta(
                 seconds=self.duration_frame/self.frame_rate)
-        duration_t_str = str(duration_t).split('.')
-        self.duration_t_str = duration_t_str[0]
-        if len(duration_t_str) > 1:
-            self.duration_t_str += '.' + duration_t_str[1][:3]
+        duration_t_str = str(duration_t)
 
         # Enable control buttons
         self.ui_setEnabled(True)
@@ -155,7 +152,7 @@ class DataMovie():
         if self.positionLabel is not None:
             pos_t_str = str(timedelta(seconds=frame_time))
             if '.' in pos_t_str:
-                pos_t_str = pos_t_str[:-4]
+                pos_t_str = pos_t_str
             else:
                 pos_t_str += '.00'
 
