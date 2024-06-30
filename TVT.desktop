@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=TVT
 Comment=Thermal Video Tracking
-Exec=/home/hika/TVT/boot_TVT.sh
+Exec=sh -c "\$HOME/TVT/boot_TVT.sh"
 Icon=/home/hika/TVT/TVT_icon.png
 Terminal=true
 Type=Application

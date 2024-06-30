@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=DLCGUI
 Comment=Thermal Video Tracking
-Exec=/home/hika/TVT/boot_DLCGUI.sh
+Exec=sh -c "\$HOME/TVT/boot_DLCGUI.sh"
 Terminal=true
 Type=Application
