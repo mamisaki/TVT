@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Update TVT
+Comment=Thermal Video Tracking
+Exec=sh -c "\$HOME/TVT/update.sh"
+Terminal=true
+Type=Application
