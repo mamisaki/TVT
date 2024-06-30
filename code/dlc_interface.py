@@ -635,7 +635,7 @@ class DLCinter():
 
             # Run command
             log_f = work_dir / 'DLC_training.out'
-            conda_dir = Path.home() / 'anaconda3'
+            conda_dir = list(Path.home().glob('*conda3'))[0]
             if not conda_dir.is_dir():
                 self.show_err_msg(f"Not found {conda_dir}")
                 return
@@ -761,7 +761,7 @@ class DLCinter():
 
         # Run command
         log_f = data_dir / 'batch_DLC_training.out'
-        conda_dir = Path.home() / 'anaconda3'
+        conda_dir = list(Path.home().dir('*conda3'))[0]
         if not conda_dir.is_dir():
             self.show_err_msg(f"Not found {conda_dir}")
             return

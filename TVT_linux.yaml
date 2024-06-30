@@ -1,14 +1,21 @@
 # TVT.yaml
 name: TVT
 channels:
-  - defaults
   - conda-forge
+  - defaults
 dependencies:
   - python=3.10
   - pip
+  - ipython
+  - jupyter
+  - nb_conda
+  - notebook<7.0.0
+  - ffmpeg
+  - pytables==3.8.0
   - pip:
-    - "deeplabcut[gui,tf]"
-    - nvidia-pyindex
-    - nvidia-tensorrt
+    - "deeplabcut[gui,modelzoo,wandb]==2.3.10"
+    - tensorflow<=2.10
+    - tensorpack
+    - tf-slim
+    - tensorrt
   - ffmpeg-python
-  - cudatoolkit
