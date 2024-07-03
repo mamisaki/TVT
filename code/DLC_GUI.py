@@ -1205,7 +1205,7 @@ class DLC_GUI(QObject):
                 st_dir = self.videoData.filename.parent
             conf_file, _ = QFileDialog.getOpenFileName(
                     self.main_win, "DLC config", str(st_dir),
-                    "config yaml files (config_rel.yaml);;yaml (*.yaml)",
+                    "config yaml files (config_*.yaml);;yaml (*.yaml)",
                     None, QFileDialog.DontUseNativeDialog)
 
             if conf_file == '':

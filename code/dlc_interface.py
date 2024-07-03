@@ -166,16 +166,6 @@ class DLCinter():
                     vf = str((self.DATA_ROOT / vf))
                     video_sets[vf] = config_data['video_sets'][vf0]
 
-            # Make extention lower case
-            config_data['video_sets'] = {}
-            for pp0, opt in video_sets.items():
-                pp = Path(pp0)
-                pp = Path(pp).parent / \
-                    (Path(pp).stem + Path(pp).suffix.lower())
-                if str(pp) != pp0:
-                    Path(pp0).rename(pp)
-                config_data['video_sets'] = {str(pp): opt}
-
             out_f = Path(config_path0).parent / f'config_{self.HOSTNAME}.yaml'
             self._config_path = config_path0
             self._config_work_path = out_f
