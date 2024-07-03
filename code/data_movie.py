@@ -366,7 +366,7 @@ class DisplayImage(QLabel):
             painter.setPen(eval('Qt.{}'.format(pen_color)))
             painter.drawEllipse(x-rad, y-rad, rad*2, rad*2)
             if hasattr(self.parent, 'roi_showName_chbx'):
-                if self.parent.roi_showName_chbx.checkState() > 0:
+                if self.parent.roi_showName_chbx.checkState().value > 0:
                     painter.drawText(QPoint(x, y), point_name)
             else:
                 painter.drawText(QPoint(x, y), point_name)

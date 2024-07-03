@@ -166,7 +166,15 @@ class DLCinter():
                     vf = str((self.DATA_ROOT / vf))
                     video_sets[vf] = config_data['video_sets'][vf0]
 
-            config_data['video_sets'] = video_sets
+            # Make extention lower case
+            config_data['video_sets'] = {}
+            for pp0, opt in video_sets.items():
+                pp = Path(pp0)
+                pp = Path(pp).parent / \
+                    (Path(pp).stem + Path(pp).suffix.lower())
+                if str(pp) != pp0:
+                    Path(pp0).rename(pp)
+                config_data['video_sets'] = {str(pp): opt}
 
             out_f = Path(config_path0).parent / f'config_{self.HOSTNAME}.yaml'
             self._config_path = config_path0
@@ -789,21 +797,6 @@ class DLCinter():
         Task = config_data['Task']
         date = config_data['date']
         snapshotindex = config_data['snapshotindex']
-        if snapshotindex == -1:
-            trainFraction = config_data['TrainingFraction'][0]
-            modelfolder = Path(config_data["project_path"])
-            GetModelFolder = auxiliaryfunctions.get_model_folder
-            modelfolder /= GetModelFolder(trainFraction, shuffle,
-                                          config_data)
-            Snapshots = [int(re.search(r'\d+', fn.stem).group())
-                         for fn in (modelfolder / 'train').glob('*.index')]
-            if len(Snapshots):
-                snapshotindex = np.max(Snapshots)
-                self.edit_config(
-                    edit_keys=['snapshotindex'],
-                    default_values={'snapshotindex': int(snapshotindex)})
-            else:
-                return []
 
         pred_f_temp = f"{videoname}DeepCut_resnet50_{Task}{date}"
         pred_f_temp += f"shuffle{shuffle}_{snapshotindex}*"

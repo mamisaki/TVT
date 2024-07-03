@@ -857,7 +857,7 @@ class ThermalVideoModel(QObject):
                 cmin == self.main_win.thermalDispImg.cmin and \
                 cmax == self.main_win.thermalDispImg.cmax:
             # Fix checkbox
-            if self.main_win.thermal_clim_fix_chbx.checkState() != 0:
+            if self.main_win.thermal_clim_fix_chbx.checkState().value != 0:
                 self.main_win.thermalDispImg.clim = [cmin, cmax]
             else:
                 self.main_win.thermalDispImg.clim = None
@@ -866,7 +866,7 @@ class ThermalVideoModel(QObject):
 
         self.main_win.thermalDispImg.clim = [cmin, cmax]
         self.main_win.thermalDispImg.set_pixmap()
-        if self.main_win.thermal_clim_fix_chbx.checkState() == 0:
+        if self.main_win.thermal_clim_fix_chbx.checkState().value == 0:
             self.main_win.thermalDispImg.clim = None
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1713,9 +1713,8 @@ class ThermalVideoModel(QObject):
         if len(rm_lines):
             update_point_list = True
             for line in rm_lines:
-                if hasattr(self.main_win, 'plot_lin') and \
-                        line in self.main_win.plot_lin:
-                    self.main_win.plot_line[line].remove()
+                if hasattr(self.main_win, 'plot_line') and \
+                        line in self.main_win.plot_line:
                     del self.main_win.plot_line[line]
 
                 # if hasattr(self.main_win, 'plot_line_lpf') and \
@@ -1744,7 +1743,7 @@ class ThermalVideoModel(QObject):
             # Update tracking_point values
             for point in Points:
                 self.tracking_point[point].update_all_values()
-        elif self.main_win.roi_online_plot_chbx.checkState() != 0:
+        elif self.main_win.roi_online_plot_chbx.checkState().value != 0:
             # Update current data
             for point_name in Points:
                 self.tracking_point[point].get_value(
@@ -1767,6 +1766,7 @@ class ThermalVideoModel(QObject):
                 # point not in self.main_win.plot_line_lpf:
 
                 if point in self.main_win.plot_line:
+                    self.main_win.plot_line[point].remove()
                     del self.main_win.plot_line[point]
 
                 # if point in self.main_win.plot_line_lpf:
@@ -2402,7 +2402,7 @@ class ThermalVideoModel(QObject):
                 self.main_win.roi_idx_cmbbx.currentText()
 
         # thermal_clim
-        thermal_clim_fix = self.main_win.thermal_clim_fix_chbx.checkState()
+        thermal_clim_fix = self.main_win.thermal_clim_fix_chbx.checkState().value
         settings['thermal_clim_fix'] = thermal_clim_fix
         if thermal_clim_fix > 0:
             settings['thermal_clim_min'] = \

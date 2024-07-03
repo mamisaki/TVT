@@ -399,6 +399,13 @@ class DLC_GUI(QObject):
                 shutil.copy(fileName, destination)
                 fileName = destination  # Update filePath to the new location
 
+        # extention must be lower case
+        if fileName.suffix != fileName.suffix.lower():
+            fileName0 = fileName
+            fileName = fileName.parent / (fileName.stem +
+                                          fileName.suffix.lower())
+            fileName0.rename(fileName)
+
         self.videoData.open(fileName)
         self.main_win.unloadVideoDataBtn.setText(
             f"Unload {Path(fileName).name}")
@@ -1035,6 +1042,7 @@ class DLC_GUI(QObject):
                 for rmfrm in rm_marker:
                     for rmln in self.main_win.plot_marker_line[rmfrm]:
                         [ln.remove() for ln in rmln]
+                    self.main_win.plot_marker_line[rmfrm].remove()
                     del self.main_win.plot_marker_line[rmfrm]
 
         if not update_val:
@@ -1067,6 +1075,7 @@ class DLC_GUI(QObject):
                 for pp in ('x', 'y'):
                     # self.main_win.plot_ax[pp].lines.remove(
                     #     self.main_win.plot_line[pp][line])
+                    self.main_win.plot_line[pp][line].remove()
                     del self.main_win.plot_line[pp][line]
 
         # -- Plot line --------------------------------------------------------
@@ -1164,7 +1173,7 @@ class DLC_GUI(QObject):
     # --- DeepLabCut interface ------------------------------------------------
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def dlc_call(self, call, opt=None):
-        if call != 'batch_run_training':
+        if call not in ('batch_run_training', 'boot_dlc_gui'):
             # Check if the video is loaded
             if not hasattr(self, 'videoData') or not self.videoData.loaded:
                 self.main_win.error_MessageBox("No video data is loaded.")
