@@ -2073,8 +2073,10 @@ class ThermalVideoModel(QObject):
             self.dlci.create_training_dataset(num_shuffles=1)
 
         elif call == 'train_network':
-            self.dlci.train_network(proc_type=opt,
-                                    analyze_videos=[self.videoData.filename])
+            self.dlci.train_network(
+                proc_type=opt,
+                analyze_videos=[self.videoData.filename],
+                ui_edit_config=self.main_win.ui_edit_config)
 
         elif call == 'show_training_progress':
             self.dlci.show_training_progress()

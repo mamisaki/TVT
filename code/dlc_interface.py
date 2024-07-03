@@ -165,6 +165,7 @@ class DLCinter():
                     vf = vf0.replace('${DATA_ROOT}/', '')
                     vf = str((self.DATA_ROOT / vf))
                     video_sets[vf] = config_data['video_sets'][vf0]
+            config_data['video_sets'] = video_sets
 
             out_f = Path(config_path0).parent / f'config_{self.HOSTNAME}.yaml'
             self._config_path = config_path0
@@ -549,7 +550,7 @@ class DLCinter():
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def train_network(self, proc_type='run_here', analyze_videos=[],
-                      config_f=None):
+                      config_f=None, ui_edit_config=None):
         if config_f is None and not self.check_config_file():
             return
 
@@ -572,9 +573,27 @@ class DLCinter():
             self.show_err_msg(f'Not found {cmd_path}.')
             return
 
+        # Set parameters
+        train_params = {
+            'shuffle': 1,
+            'displayiters': 50000,
+            'maxiters': 100000,
+            'max_snapshots_to_keep': 5
+        }
+        if ui_edit_config is not None:
+            train_params = \
+                ui_edit_config(
+                    train_params,
+                    title='Edit training parameters')
+
         script_f = work_dir / 'DLC_training.sh'
         cmd = f"python {cmd_path} --config {conf_path}"
         cmd += f" --data_root '{self.DATA_ROOT}'"
+        cmd += f" --shuffle {train_params['shuffle']}"
+        cmd += f" --displayiters {train_params['displayiters']}"
+        cmd += f" --maxiters {train_params['maxiters']}"
+        cmd += " --max_snapshots_to_keep"
+        cmd += f" {train_params['max_snapshots_to_keep']}"
         cmd += " --create_training_dset --evaluate_network"
         if len(analyze_videos):
             video_path = [str(Path(os.path.relpath(pp, work_dir)))
