@@ -2404,7 +2404,8 @@ class ThermalVideoModel(QObject):
                 self.main_win.roi_idx_cmbbx.currentText()
 
         # thermal_clim
-        thermal_clim_fix = self.main_win.thermal_clim_fix_chbx.checkState().value
+        thermal_clim_fix = \
+            self.main_win.thermal_clim_fix_chbx.checkState().value
         settings['thermal_clim_fix'] = thermal_clim_fix
         if thermal_clim_fix > 0:
             settings['thermal_clim_min'] = \

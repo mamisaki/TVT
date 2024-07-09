@@ -20,7 +20,7 @@ import ffmpeg
 from tqdm import tqdm
 
 
-## %% CSQ_READER ==============================================================
+# %% CSQ_READER ==============================================================
 class CSQ_READER():
     """Read csq file
 
@@ -59,7 +59,8 @@ class CSQ_READER():
         self.thermaldata_npy_f = fname.parent / (fname.stem + '_temp.npy')
 
         # -- Read and split binary data ---------------------------------------
-        if not self.metadata_pkl_f.is_file() or not self.rawdata_pkl_f.is_file():
+        if not self.metadata_pkl_f.is_file() or \
+                not self.rawdata_pkl_f.is_file():
             #  Load binary data
             self._logmsg(f"Loading binary data from {fname.name} ...")
             st = time.time()
@@ -135,13 +136,15 @@ class CSQ_READER():
         if self.thermaldata_npy_f.is_file() and self.extract_temp_file:
             try:
                 self.thermal_data_frames = np.load(self.thermaldata_npy_f,
-                    mmap_mode='r+')
+                                                   mmap_mode='r+')
             except Exception:
                 self.thermal_data_frames = np.ones(
-                    [self.Count, self.Height, self.Width], dtype=np.float32) * np.nan
+                    [self.Count, self.Height, self.Width],
+                    dtype=np.float32) * np.nan
         else:
             self.thermal_data_frames = np.ones(
-                [self.Count, self.Height, self.Width], dtype=np.float32) * np.nan
+                [self.Count, self.Height, self.Width],
+                dtype=np.float32) * np.nan
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def _logmsg(self, msg, st=None, progress=None):
@@ -463,16 +466,16 @@ class CSQ_READER():
 
         # --- Read raw data from videoCap -------------------------------------
         h, w = (self.Height, self.Width)
-        thermal_data_array = np.empty([len(frame_indices), h, w])
+        thermal_data_array = np.empty([len(frame_indices), h, w],
+                                      dtype=np.float32)
 
         if progressDlg is None and len(frame_indices) > 100:
-            pbar = tqdm(total=len(frame_indices),
-                desc='Reading thermal data')
+            pbar = tqdm(total=len(frame_indices), desc='Reading thermal data')
         else:
             pbar = None
 
         for ii, fidx in enumerate(frame_indices):
-            fridx = int(np.round(fidx)) 
+            fridx = int(np.round(fidx))
             if progressDlg is not None:
                 if progressDlg.wasCanceled():
                     return None
@@ -573,21 +576,19 @@ class CSQ_READER():
 
         frame_idx = np.round(t_sec * self.FrameRate)
         return self.getFramebyIdx(frame_idx)
-    
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def saveTempFrames(self, frame_indices=None, update=False):
         if update:
             if frame_indices is None:
                 frame_indices = np.arange(0, self.Count, dtype=int)
             _ = self._get_thermal_data(frame_indices, update=update)
-        
+
         np.save(self.thermaldata_npy_f, self.thermal_data_frames)
 
-## %% main =====================================================================
+
+# %% main =====================================================================
 if __name__ == '__main__':
     fname = '../data/dog_EmotionalContingency/FLIR6551.csq'
     csq_read = CSQ_READER(fname)
     csq_read.saveTempFrames()
-
-
-
