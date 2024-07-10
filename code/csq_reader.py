@@ -449,7 +449,7 @@ class CSQ_READER():
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def _get_thermal_data(self, frame_indices, progressDlg=None, update=False,
-                          verb=False):
+                          update_buffer=True, verb=False):
 
         # --- Check frame index -----------------------------------------------
         frame_indices = np.array(frame_indices)
@@ -515,8 +515,9 @@ class CSQ_READER():
                     )
                 thermal_data_array[ii, :, :] = thermal_data
 
-                # Save read thermal_data into self.thermal_data_frames
-                self.thermal_data_frames[fridx, :, :] = thermal_data
+                if update_buffer:
+                    # Save read thermal_data into self.thermal_data_frames
+                    self.thermal_data_frames[fridx, :, :] = thermal_data
 
             if pbar is not None:
                 pbar.update()

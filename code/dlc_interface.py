@@ -31,9 +31,7 @@ import unicodedata
 # import warnings
 # warnings.simplefilter(action='ignore', category=FutureWarning)
 
-import numpy as np
 import deeplabcut as dlc
-from deeplabcut.utils import auxiliaryfunctions
 import yaml
 from PySide6.QtWidgets import QMessageBox
 

@@ -420,38 +420,42 @@ class ThermalDataMovie(DataMovie):
             gray_fname = dst_dir / (fname + '_gray.mp4')
             color_fname = dst_dir / (fname + '_color.mp4')
 
-        # --- Get frame data --------------------------------------------------
+        # --- Ask parameters --------------------------------------------------
+        low_perc = 15
+        high_perc = 99.9
+
+        # --- Convert thermal data to a video image ---------------------------
         frame_indices = np.arange(self.duration_frame, dtype=int)
 
         # Open progress dialog
-        progressDlg = QProgressDialog('Reading thermal data ...',
-                                      'Cancel', 0,
-                                      int(np.round(len(frame_indices)*1.1)),
-                                      self.model.main_win)
+        progressDlg = QProgressDialog(
+            'Convert thermal data into a video file ...',
+            'Cancel', 0,
+            len(frame_indices),
+            self.model.main_win)
         progressDlg.setWindowTitle("Export thermal data as a video file")
         progressDlg.setWindowModality(Qt.WindowModal)
         progressDlg.resize(400, 89)
         progressDlg.show()
 
-        thermal_data_array = \
-            self.thermal_data_reader._get_thermal_data(frame_indices,
-                                                       progressDlg=progressDlg)
-        if thermal_data_array is None:
-            # Cnaceled
-            progressDlg.close()
-            return None
+        thermal_data_array0 = self.thermal_data_reader._get_thermal_data([0])
+        arr_shape = [len(frame_indices),
+                     thermal_data_array0.shape[1], thermal_data_array0.shape[2]
+                     ]
 
-        progressDlg.setLabelText('Convert to image movie ...')
-
-        gray_img_data = np.empty_like(thermal_data_array, dtype=np.uint8)
-        color_img_data = np.empty([*thermal_data_array.shape, 3],
-                                  dtype=np.uint8)
-        for ii, frame in enumerate(thermal_data_array):
-            progressDlg.setValue(int(np.round(len(frame_indices) + ii*0.1)))
+        gray_img_data = np.empty(arr_shape, dtype=np.uint8)
+        color_img_data = np.empty([*arr_shape, 3], dtype=np.uint8)
+        for ii in frame_indices:
+            progressDlg.setValue(ii)
+            progressDlg.setLabelText(
+                "Convert thermal data into a video file ..."
+                f" ({ii+1}/{len(frame_indices)})")
             progressDlg.repaint()
 
             # Scale frame-by-frame
-            low, high = np.percentile(frame.ravel(), [15, 99.9])
+            frame = self.thermal_data_reader._get_thermal_data(
+                [ii], update_buffer=False)[0, :, :]
+            low, high = np.percentile(frame.ravel(), [low_perc, high_perc])
             gray_frame = (frame - low) / (high - low)
             gray_frame *= 255
             gray_frame[gray_frame < 0] = 0
@@ -461,6 +465,9 @@ class ThermalDataMovie(DataMovie):
             color_frame = cv2.applyColorMap(255-gray_frame.astype(np.uint8),
                                             themro_cmap)
             color_img_data[ii, :, :, :] = color_frame
+
+            if progressDlg is None:
+                return
 
         progressDlg.setValue(np.round(int(len(frame_indices)*1.1)))
         progressDlg.setLabelText('Save movie file ...')
@@ -2497,6 +2504,9 @@ class ThermalVideoModel(QObject):
         # thermal_clim
         if 'thermal_clim_fix' in settings:
             self.main_win.thermal_clim_fix_chbx.blockSignals(True)
+            if hasattr(settings['thermal_clim_fix'], 'value'):
+                settings['thermal_clim_fix'] = \
+                    settings['thermal_clim_fix'].value
             self.main_win.thermal_clim_fix_chbx.setChecked(
                     settings['thermal_clim_fix'])
             self.main_win.thermal_clim_fix_chbx.blockSignals(False)
