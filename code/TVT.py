@@ -466,7 +466,7 @@ class ThermalDataMovie(DataMovie):
                                             themro_cmap)
             color_img_data[ii, :, :, :] = color_frame
 
-            if progressDlg is None:
+            if progressDlg.wasCanceled():
                 return
 
         progressDlg.setValue(np.round(int(len(frame_indices)*1.1)))
