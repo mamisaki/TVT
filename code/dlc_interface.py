@@ -566,43 +566,45 @@ class DLCinter():
             conf_path = Path(self._config_path).name
 
         # --- Write a training script -----------------------------------------
+        script_f = work_dir / 'DLC_training.sh'
+
         cmd_path = Path(__file__).parent / 'run_dlc_train.py'
         if not cmd_path.is_file():
             self.show_err_msg(f'Not found {cmd_path}.')
             return
 
-        # Set parameters
-        train_params = {
-            'shuffle': 1,
-            'displayiters': 50000,
-            'maxiters': 100000,
-            'max_snapshots_to_keep': 5
-        }
-        if ui_edit_config is not None:
-            train_params = \
-                ui_edit_config(
-                    train_params,
-                    title='Edit training parameters')
+        if proc_type == 'prepare_script':
+            # Set parameters
+            train_params = {
+                'shuffle': 1,
+                'displayiters': 50000,
+                'maxiters': 100000,
+                'max_snapshots_to_keep': 5
+            }
+            if ui_edit_config is not None:
+                train_params = \
+                    ui_edit_config(
+                        train_params,
+                        title='Edit training parameters')
 
-        script_f = work_dir / 'DLC_training.sh'
-        cmd = f"python {cmd_path} --config {conf_path}"
-        cmd += f" --data_root '{self.DATA_ROOT}'"
-        cmd += f" --shuffle {train_params['shuffle']}"
-        cmd += f" --displayiters {train_params['displayiters']}"
-        cmd += f" --maxiters {train_params['maxiters']}"
-        cmd += " --max_snapshots_to_keep"
-        cmd += f" {train_params['max_snapshots_to_keep']}"
-        cmd += " --create_training_dset --evaluate_network"
-        if len(analyze_videos):
-            video_path = [str(Path(os.path.relpath(pp, work_dir)))
-                          for pp in analyze_videos]
-            cmd += f" --analyze_videos {' '.join(video_path)}"
-            cmd += " --filterpredictions"
+            cmd = f"python {cmd_path} --config {conf_path}"
+            cmd += f" --data_root '{self.DATA_ROOT}'"
+            cmd += f" --shuffle {train_params['shuffle']}"
+            cmd += f" --displayiters {train_params['displayiters']}"
+            cmd += f" --maxiters {train_params['maxiters']}"
+            cmd += " --max_snapshots_to_keep"
+            cmd += f" {train_params['max_snapshots_to_keep']}"
+            cmd += " --create_training_dset --evaluate_network"
+            if len(analyze_videos):
+                video_path = [str(Path(os.path.relpath(pp, work_dir)))
+                            for pp in analyze_videos]
+                cmd += f" --analyze_videos {' '.join(video_path)}"
+                cmd += " --filterpredictions"
 
-        with open(script_f, 'w') as fd:
-            fd.write('#!/bin/bash\n')
-            fd.write(f"cd {str(work_dir)}\n")
-            fd.write(cmd)
+            with open(script_f, 'w') as fd:
+                fd.write('#!/bin/bash\n')
+                fd.write(f"cd {str(work_dir)}\n")
+                fd.write(cmd)
 
         if self.OS == 'Windows':
             run_cmd = "bash.exe"

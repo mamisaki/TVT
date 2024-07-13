@@ -13,3 +13,5 @@ stat*
 *.mp4
 etc/conda/activate.d/env_vars.sh
 etc/conda/deactivate.d/env_vars.sh
+*.csq
+TVT_data/*
