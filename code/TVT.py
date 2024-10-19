@@ -871,7 +871,8 @@ class ThermalVideoModel(QObject):
                 cmin == self.main_win.thermalDispImg.cmin and \
                 cmax == self.main_win.thermalDispImg.cmax:
             # Fix checkbox
-            if self.main_win.thermal_clim_fix_chbx.checkState() != 0:
+            if self.main_win.thermal_clim_fix_chbx.checkState() != \
+                    Qt.CheckState.Unchecked:
                 self.main_win.thermalDispImg.clim = [cmin, cmax]
             else:
                 self.main_win.thermalDispImg.clim = None
@@ -880,7 +881,8 @@ class ThermalVideoModel(QObject):
 
         self.main_win.thermalDispImg.clim = [cmin, cmax]
         self.main_win.thermalDispImg.set_pixmap()
-        if self.main_win.thermal_clim_fix_chbx.checkState() == 0:
+        if self.main_win.thermal_clim_fix_chbx.checkState() == \
+                Qt.CheckState.Unchecked:
             self.main_win.thermalDispImg.clim = None
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1778,7 +1780,8 @@ class ThermalVideoModel(QObject):
             # Update tracking_point values
             for point in Points:
                 self.tracking_point[point].update_all_values()
-        elif self.main_win.roi_online_plot_chbx.checkState() != 0:
+        elif self.main_win.roi_online_plot_chbx.checkState() != \
+                Qt.CheckState.Unchecked:
             # Update current data
             for point_name in Points:
                 self.tracking_point[point].get_value(
@@ -2464,7 +2467,7 @@ class ThermalVideoModel(QObject):
         thermal_clim_fix = \
             self.main_win.thermal_clim_fix_chbx.checkState()
         settings['thermal_clim_fix'] = thermal_clim_fix
-        if thermal_clim_fix > 0:
+        if thermal_clim_fix != Qt.CheckState.Unchecked:
             settings['thermal_clim_min'] = \
                 self.main_win.thermal_clim_min_spbx.value()
             settings['thermal_clim_max'] = \

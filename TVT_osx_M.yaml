@@ -2,15 +2,16 @@
 name: TVT
 channels:
   - conda-forge
-  - apple
+  - defaults
 dependencies:
   - python=3.10
   - pip
-  - hdf5
-  - wxpython
-  - tensorflow-deps
+  - ipython
+  - jupyter
+  - nb_conda
+  - notebook<7.0.0
+  - ffmpeg
+  - pytables==3.8.0
   - pip:
-    - tensorflow-macos
-    - tensorflow-metal
-    - "deeplabcut[gui, tf]"
+    - "git+https://github.com/DeepLabCut/DeepLabCut.git@pytorch_dlc#egg=deeplabcut[gui,modelzoo,wandb]"
   - ffmpeg-python
