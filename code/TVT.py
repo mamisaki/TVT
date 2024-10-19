@@ -934,8 +934,7 @@ class ThermalVideoModel(QObject):
             stdir = self.DATA_ROOT
             fileName, _ = QFileDialog.getOpenFileName(
                 self.main_win, "Open Movie", str(stdir),
-                "movie files (*.mp4 *.avi);; all (*.*)", None)  # ,
-                # QFileDialog.DontUseNativeDialog)
+                "movie files (*.mp4 *.avi);; all (*.*)", None)
 
             if fileName == '':
                 return
@@ -1945,8 +1944,7 @@ class ThermalVideoModel(QObject):
                                     '_tracking_points.csv')
             fname, _ = QFileDialog.getSaveFileName(
                     self.main_win, "Export data filename", str(initial_name),
-                    "csv (*.csv);;all (*.*)", None)  # ,
-                    # QFileDialog.DontUseNativeDialog)
+                    "csv (*.csv);;all (*.*)", None)
             if fname == '':
                 return
 
@@ -2065,7 +2063,7 @@ class ThermalVideoModel(QObject):
             conf_file, _ = QFileDialog.getOpenFileName(
                     self.main_win, "DLC config", str(st_dir),
                     "config yaml files (config_*.yaml);;yaml (*.yaml)",
-                    None)  #, QFileDialog.DontUseNativeDialog)
+                    None)
 
             if conf_file == '':
                 return
@@ -2219,8 +2217,7 @@ class ThermalVideoModel(QObject):
             stdir = self.videoData.filename.parent
             fileName, _ = QFileDialog.getOpenFileName(
                     self.main_win, "Open tracking file", str(stdir),
-                    "csv files (*.csv)", None)  #, QFileDialog.DontUseNativeDialog)
-
+                    "csv files (*.csv)", None)
             if fileName == '':
                 return
 
@@ -2407,8 +2404,7 @@ class ThermalVideoModel(QObject):
 
             fname, _ = QFileDialog.getSaveFileName(
                     self.main_win, "Save setting filename", str(stdir),
-                    "pkl (*.pkl);;all (*.*)", None)  #,
-                    #QFileDialog.DontUseNativeDialog)
+                    "pkl (*.pkl);;all (*.*)", None)
             if fname == '':
                 return
 
@@ -2707,6 +2703,18 @@ class ThermalVideoModel(QObject):
         conf = {'DATA_ROOT': str(self.DATA_ROOT)}
         with open(self.conf_f, 'w') as fd:
             json.dump(conf, fd)
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def show_focus(self):
+        pass
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def focus_filter(self):
+        pass
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def remove_temprature_outlier(self):
+        pass
 
 
 # %% View class : MainWindow ==================================================
@@ -3405,6 +3413,28 @@ class MainWindow(QMainWindow):
         action.setStatusTip('Load positions tracked by DeepLabCut')
         action.triggered.connect(self.model.load_tracking)
         dlcMenu.addAction(action)
+
+        # -- Filter menu --
+        filterMenu = menuBar.addMenu('Filter')
+
+        # Show Focus level
+        showFocusAction = QAction('Show Image Focus Level', self)
+        showFocusAction.setStatusTip('Show blurring level')
+        showFocusAction.triggered.connect(self.model.show_focus)
+        filterMenu.addAction(showFocusAction)
+
+        # Filter Focus
+        focusFilterAction = QAction('Image Focus filter', self)
+        focusFilterAction.setStatusTip('Filtering blurred frames')
+        focusFilterAction.triggered.connect(self.model.focus_filter)
+        filterMenu.addAction(focusFilterAction)
+
+        # Filter Temprature outlier
+        tempOutlierFilterAction = QAction('Temperature outlier', self)
+        tempOutlierFilterAction.setStatusTip('Remove temperature outliers')
+        tempOutlierFilterAction.triggered.connect(
+            self.model.remove_temprature_outlier)
+        filterMenu.addAction(tempOutlierFilterAction)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def thermal_cbar_lab_resizeEvent(self, ev):
