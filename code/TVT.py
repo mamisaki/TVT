@@ -2634,6 +2634,10 @@ class ThermalVideoModel(QObject):
                 for k, v in dobj.items():
                     if hasattr(self.tracking_point[lab], k):
                         setattr(self.tracking_point[lab], k, v)
+                        if k == 'radius' and type(v) is int:
+                            self.tracking_point[lab].radius = \
+                                np.ones_like(self.tracking_point[lab].x,
+                                             dtype=int) * v
 
             if len(self.tracking_point):
                 for point_name, tm in settings['tracking_mark'].items():
