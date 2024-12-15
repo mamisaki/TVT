@@ -573,6 +573,7 @@ class DLCinter():
             self.show_err_msg(f'Not found {cmd_path}.')
             return
 
+        shuffle = '*'
         if proc_type == 'prepare_script':
             # Set parameters
             train_params = {
@@ -586,6 +587,7 @@ class DLCinter():
                     ui_edit_config(
                         train_params,
                         title='Edit training parameters')
+            shuffle = str(train_params['shuffle'])
 
             cmd = f"python {cmd_path} --config {conf_path}"
             cmd += f" --data_root '{self.DATA_ROOT}'"
@@ -610,6 +612,21 @@ class DLCinter():
             run_cmd = "bash.exe"
         else:
             run_cmd = "/bin/bash"
+
+        # --- Copy mat file: workaround for the filenmae error ----------------
+        iteDirs = sorted(
+            list((work_dir / 'training-datasets').glob('iteration-*')))
+        if len(iteDirs) > 0:
+            dataDir = sorted(list(iteDirs[-1].glob('*DataSet*')))[-1]
+            for mat_f0 in sorted(list(dataDir.glob(f'*shuffle{shuffle}.mat'))):
+                mat_f = mat_f0.parent / \
+                    re.sub('\..+shuffle\d+\.mat', '.mat', mat_f0.name)
+                if mat_f.is_file():
+                    if mat_f.stat().st_ctime < mat_f0.stat().st_ctime:
+                        mat_f.unlink()
+                
+                if not mat_f.is_file():
+                    shutil.copy(mat_f0, mat_f)
 
         # ---------------------------------------------------------------------
         if proc_type == 'prepare_script' and config_f is None:
