@@ -1638,7 +1638,8 @@ class DLC_GUI(QObject):
                     point_name = list(self.tracking_point.keys())[0]
 
                 self.edit_tracking_point(point_name)
-                del settings['current_point_name']
+                if 'current_point_name' in settings:
+                    del settings['current_point_name']
 
             del settings['tracking_point']
 
