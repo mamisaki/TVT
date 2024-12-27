@@ -1384,9 +1384,9 @@ class DLC_GUI(QObject):
             if lh_thresh is None:
                 lh_thresh, ok = QInputDialog.getDouble(
                     self.main_win, 'Likelihood',
-                    'Likelihood threshold:', value=0.9,
+                    'Likelihood threshold:', value=0.3,
                     minValue=0.0, maxValue=1.0,
-                    decimals=2)
+                    decimals=2, step=0.01)
                 if not ok:
                     return
 

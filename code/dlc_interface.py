@@ -324,9 +324,10 @@ class DLCinter():
 
         # Set editing keys
         if edit_keys is None:
-            edit_keys = ['Task', 'bodyparts', 'corner2move2', 'date',
-                         'default_net_type', 'iteration', 'move2corner',
-                         'start', 'stop', 'x1', 'x2', 'y1', 'y2']
+            edit_keys = [
+                'Task', 'bodyparts', 'corner2move2', 'date',
+                'default_net_type', 'iteration', 'move2corner',
+                'start', 'stop', 'x1', 'x2', 'y1', 'y2']
 
         # Read config file
         config_data = self.get_config()
