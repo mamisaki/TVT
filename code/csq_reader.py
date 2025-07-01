@@ -551,7 +551,7 @@ class CSQ_READER():
 
         # Preapare mask
         mask = np.zeros([self.Height, self.Width], dtype=np.uint8)
-        mask = cv2.circle(mask, (int(cx), int(cy)), rad, (1, 1, 1), -1)
+        mask = cv2.circle(mask, (int(cx), int(cy)), int(rad), (1, 1, 1), -1)
 
         # Read thermal data
         frame = np.squeeze(self._get_thermal_data([frame_idx]))

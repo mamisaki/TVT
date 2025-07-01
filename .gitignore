@@ -14,4 +14,7 @@ stat*
 etc/conda/activate.d/env_vars.sh
 etc/conda/deactivate.d/env_vars.sh
 *.csq
+data/*
 TVT_data/*
+cock_miyagawa/*
+

@@ -51,6 +51,8 @@ class DataMovie():
         self.frBkwBtn.clicked.connect(self.prev_frame)
         self.skipFwdBtn.clicked.connect(self.skip_fwd)
         self.skipBkwBtn.clicked.connect(self.skip_bkw)
+        self.framePosSpBox.valueChanged.connect(
+            lambda x: self.show_frame(x-1))
 
         # Time shift from the common time of video and thermal data
         # N.B. comtime is thermal time, so this is always 0 for thermal data
@@ -61,9 +63,9 @@ class DataMovie():
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def open(self, filename):
         self.filename = Path(filename)
-        duration_t = timedelta(
-                seconds=self.duration_frame/self.frame_rate)
-        duration_t_str = str(duration_t)
+        # duration_t = timedelta(
+        #         seconds=self.duration_frame/self.frame_rate)
+        # duration_t_str = str(duration_t)
 
         # Enable control buttons
         self.ui_setEnabled(True)
@@ -76,6 +78,9 @@ class DataMovie():
         self.frame_position = -1
         self.show_frame(0)
 
+        self.framePosSpBox.setMinimum(1)
+        self.framePosSpBox.setMaximum(self.duration_frame)
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def read_frame(self, frame_idx):
         """Dummy class
@@ -84,7 +89,8 @@ class DataMovie():
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def ui_setEnabled(self, enabled=True):
-        for btn in ('frFwdBtn', 'frBkwBtn', 'skipFwdBtn', 'skipBkwBtn'):
+        for btn in ('frFwdBtn', 'frBkwBtn', 'skipFwdBtn', 'skipBkwBtn',
+                    'framePosSpBox'):
             if getattr(self, btn) is not None:
                 getattr(self, btn).setEnabled(enabled)
 
@@ -161,6 +167,10 @@ class DataMovie():
                     self.frame_position+1, self.duration_frame,
                     self.frame_rate, frame_data.shape[1], frame_data.shape[0])
             self.positionLabel.setText(pos_txt)
+
+        self.framePosSpBox.blockSignals(True)
+        self.framePosSpBox.setValue(frame_idx+1)
+        self.framePosSpBox.blockSignals(False)
 
         # --- Show the frame ---
         self.dispImg.set_frame(frame_data)
@@ -366,7 +376,8 @@ class DisplayImage(QLabel):
             painter.setPen(eval('Qt.{}'.format(pen_color)))
             painter.drawEllipse(x-rad, y-rad, rad*2, rad*2)
             if hasattr(self.parent, 'roi_showName_chbx'):
-                if self.parent.roi_showName_chbx.checkState().value > 0:
+                if self.parent.roi_showName_chbx.checkState() != \
+                        Qt.CheckState.Unchecked:
                     painter.drawText(QPoint(x, y), point_name)
             else:
                 painter.drawText(QPoint(x, y), point_name)

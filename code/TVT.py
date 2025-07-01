@@ -121,7 +121,8 @@ class TrackingPoint():
         data_length = self.dataMovie.duration_frame
         self.x = np.ones(data_length) * x
         self.y = np.ones(data_length) * y
-        self.radius = tracking_point_radius_default
+        self.radius = np.ones(data_length, dtype=int) * \
+            tracking_point_radius_default
         self.aggfunc = tracking_point_aggfunc_default
         self.value_ts = np.ones(data_length) * np.nan
 
@@ -151,16 +152,18 @@ class TrackingPoint():
     def get_value(self, frame_indices, force_update=False):
         # Update values
         xyt = np.ndarray([0, 3])
+        radii = []
         for t in frame_indices:
             if not force_update and not np.isnan(self.value_ts[t]):
                 continue
             x = self.x[t]
             y = self.y[t]
             xyt = np.concatenate([xyt, [[x, y, t]]], axis=0)
+            radii.append(self.radius[t])
 
         if len(xyt):
             val = self.dataMovie.get_rois_dataseries(
-                    [xyt], [self.radius], aggfunc=[self.aggfunc])[0]
+                    [xyt], [radii], aggfunc=[self.aggfunc])[0]
             self.value_ts[frame_indices] = val
 
         val = self.value_ts[frame_indices]
@@ -578,9 +581,9 @@ class ThermalDataMovie(DataMovie):
             progressDlg.show()
             prog_n = 0
 
-        for ii, frmIdx in enumerate(read_frames):
+        for ii, frmIdx in enumerate(read_frames.astype(int)):
             for jj, xyt in enumerate(points_ts):
-                rad = rads[jj]
+                rad = rads[jj][ii]
                 aggf = aggfunc[jj]
 
                 p_idx = np.argwhere(xyt[:, 2] == frmIdx).ravel()
@@ -698,6 +701,8 @@ class ThermalVideoModel(QObject):
                 'frBkwBtn': self.main_win.thermalFrameBkwBtn,
                 'skipFwdBtn': self.main_win.thermalSkipFwdBtn,
                 'skipBkwBtn': self.main_win.thermalSkipBkwBtn,
+                'framePosSpBox': self.main_win.thermalFramePosSpBox,
+                'framePosLab': self.main_win.thermalFramePosLab,
                 'positionLabel': self.main_win.thermalPositionLab,
                 'syncBtn': self.main_win.syncVideoBtn}
             self.thermalData = ThermalDataMovie(
@@ -708,6 +713,8 @@ class ThermalVideoModel(QObject):
                              'frBkwBtn': self.main_win.videoFrameBkwBtn,
                              'skipFwdBtn': self.main_win.videoSkipFwdBtn,
                              'skipBkwBtn': self.main_win.videoSkipBkwBtn,
+                             'framePosSpBox': self.main_win.videoFramePosSpBox,
+                             'framePosLab': self.main_win.videoFramePosLab,
                              'positionLabel': self.main_win.videoPositionLab,
                              'syncBtn': self.main_win.syncVideoBtn}
         self.videoData = VideoDataMovie(self, self.main_win.videoDispImg,
@@ -794,7 +801,7 @@ class ThermalVideoModel(QObject):
             filterStr = "Thermal data (*.csq);;All files (*.*)"
             fileName, _ = QFileDialog.getOpenFileName(
                 self.main_win, "Open thermal file", str(stdir), filterStr,
-                None, QFileDialog.DontUseNativeDialog)
+                None)  # , QFileDialog.DontUseNativeDialog)
 
             if fileName == '':
                 return
@@ -864,7 +871,8 @@ class ThermalVideoModel(QObject):
                 cmin == self.main_win.thermalDispImg.cmin and \
                 cmax == self.main_win.thermalDispImg.cmax:
             # Fix checkbox
-            if self.main_win.thermal_clim_fix_chbx.checkState().value != 0:
+            if self.main_win.thermal_clim_fix_chbx.checkState() != \
+                    Qt.CheckState.Unchecked:
                 self.main_win.thermalDispImg.clim = [cmin, cmax]
             else:
                 self.main_win.thermalDispImg.clim = None
@@ -873,7 +881,8 @@ class ThermalVideoModel(QObject):
 
         self.main_win.thermalDispImg.clim = [cmin, cmax]
         self.main_win.thermalDispImg.set_pixmap()
-        if self.main_win.thermal_clim_fix_chbx.checkState().value == 0:
+        if self.main_win.thermal_clim_fix_chbx.checkState() == \
+                Qt.CheckState.Unchecked:
             self.main_win.thermalDispImg.clim = None
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -925,8 +934,7 @@ class ThermalVideoModel(QObject):
             stdir = self.DATA_ROOT
             fileName, _ = QFileDialog.getOpenFileName(
                 self.main_win, "Open Movie", str(stdir),
-                "movie files (*.mp4 *.avi);; all (*.*)", None,
-                QFileDialog.DontUseNativeDialog)
+                "movie files (*.mp4 *.avi);; all (*.*)", None)
 
             if fileName == '':
                 return
@@ -1031,6 +1039,17 @@ class ThermalVideoModel(QObject):
         self.main_win.syncVideoBtn.setText('Unsync video to thermo')
 
     # --- Common movie control functions --------------------------------------
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def set_video_frame(self, frame, caller=None):
+        if self.videoData.loaded and self.on_sync:
+            if caller != self.videoData:
+                self.videoData.show_frame(frame_idx=frame,
+                                          sync_update=False)
+        if caller is None:
+            caller.blockSignals(True)
+            caller.setValue(frame)
+            caller.blockSignals(False)
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def set_common_time(self, time_ms=None, caller=None):
         if time_ms is None:
@@ -1170,6 +1189,8 @@ class ThermalVideoModel(QObject):
         self.main_win.roi_color_cmbbx.blockSignals(True)
 
         if point_name in self.tracking_mark:
+            frame = self.thermalData.frame_position
+
             # Set main_win values
             self.main_win.roi_idx_cmbbx.setCurrentText(point_name)
             self.main_win.roi_name_ledit.setText(point_name)
@@ -1182,13 +1203,12 @@ class ThermalVideoModel(QObject):
                 self.main_win.roi_x_spbx.setValue(int(x))
                 self.main_win.roi_y_spbx.setValue(int(y))
             self.main_win.roi_rad_spbx.setValue(
-                    self.tracking_point[point_name].radius)
+                    self.tracking_point[point_name].radius[frame])
             self.main_win.roi_aggfunc_cmbbx.setCurrentText(
                     self.tracking_point[point_name].aggfunc)
             self.main_win.roi_color_cmbbx.setCurrentText(
                     self.tracking_mark[point_name]['pen_color'])
 
-            frame = self.thermalData.frame_position
             val = self.tracking_point[point_name].get_value([frame])[0]
 
             if np.isnan(val):
@@ -1196,7 +1216,7 @@ class ThermalVideoModel(QObject):
             else:
                 self.main_win.roi_val_lab.setText(f'Temp. {val:.2f} °C')
         else:
-            # point_nameis deleted. Reset
+            # point_name is deleted. Reset
             self.main_win.roi_name_ledit.setText('')
             self.main_win.roi_x_spbx.setValue(-1)
             self.main_win.roi_y_spbx.setValue(-1)
@@ -1273,7 +1293,8 @@ class ThermalVideoModel(QObject):
                 # Set tracking mark properties with tracking_point object
                 self.tracking_mark[point_name]['name'] = point_name
                 self.tracking_mark[point_name]['rad'] = \
-                    self.tracking_point[point_name].radius
+                    self.tracking_point[point_name].radius[
+                        self.thermalData.frame_position]
                 self.tracking_mark[point_name]['aggfunc'] = \
                     self.tracking_point[point_name].aggfunc
                 self.tracking_mark[point_name]['pen_color'] = \
@@ -1283,7 +1304,7 @@ class ThermalVideoModel(QObject):
                 frame_indices = np.arange(self.thermalData.frame_position,
                                           self.thermalData.duration_frame)
                 self.tracking_point[point_name].set_position(
-                        x, y, frame_indices,
+                        x, y, frame_indices=frame_indices,
                         update_frames=[self.thermalData.frame_position])
 
         # update display
@@ -1312,6 +1333,7 @@ class ThermalVideoModel(QObject):
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def edit_point_property(self, *args):
+        frame = self.thermalData.frame_position
         point_name = self.main_win.roi_idx_cmbbx.currentText()
         edit_name = self.main_win.roi_name_ledit.text()
         x = self.main_win.roi_x_spbx.value()
@@ -1350,11 +1372,11 @@ class ThermalVideoModel(QObject):
                     sorted(list(self.tracking_point.keys())))
 
         # Radius change
-        if rad != self.tracking_point[point_name].radius:
-            self.tracking_point[point_name].radius = rad
+        if rad != self.tracking_point[point_name].radius[frame]:
+            self.tracking_point[point_name].radius[frame] = rad
             self.tracking_mark[point_name]['rad'] = rad
             # Reset tracking values
-            self.tracking_point[point_name].value_ts[:] = np.nan
+            self.tracking_point[point_name].value_ts[frame] = np.nan
 
         # aggfunc change
         if aggfunc != self.tracking_point[point_name].aggfunc:
@@ -1370,7 +1392,6 @@ class ThermalVideoModel(QObject):
             self.tracking_mark[point_name]['y'] = y
 
             # Reset tracking values from the current frame
-            frame = self.thermalData.frame_position
             Nframes = len(self.tracking_point[point_name].value_ts)
 
             if self.editRange == 'current':
@@ -1433,6 +1454,14 @@ class ThermalVideoModel(QObject):
 
         self.plot_timecourse()
         self.set_editRange(0)
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def apply_radius_all(self, *args):
+        point_name = self.main_win.roi_idx_cmbbx.currentText()
+        rad = self.main_win.roi_rad_spbx.value()
+        val_reset_frames = self.tracking_point[point_name].radius != rad
+        self.tracking_point[point_name].radius[:] = rad
+        self.tracking_point[point_name].value_ts[val_reset_frames] = np.nan
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def erase_point(self):
@@ -1750,7 +1779,8 @@ class ThermalVideoModel(QObject):
             # Update tracking_point values
             for point in Points:
                 self.tracking_point[point].update_all_values()
-        elif self.main_win.roi_online_plot_chbx.checkState().value != 0:
+        elif self.main_win.roi_online_plot_chbx.checkState() != \
+                Qt.CheckState.Unchecked:
             # Update current data
             for point_name in Points:
                 self.tracking_point[point].get_value(
@@ -1914,8 +1944,7 @@ class ThermalVideoModel(QObject):
                                     '_tracking_points.csv')
             fname, _ = QFileDialog.getSaveFileName(
                     self.main_win, "Export data filename", str(initial_name),
-                    "csv (*.csv);;all (*.*)", None,
-                    QFileDialog.DontUseNativeDialog)
+                    "csv (*.csv);;all (*.*)", None)
             if fname == '':
                 return
 
@@ -1944,7 +1973,7 @@ class ThermalVideoModel(QObject):
         cols = pd.MultiIndex.from_product([[''], ['time_ms', 'marker']])
         cols = cols.append(
             pd.MultiIndex.from_product(
-                [Points, ['x', 'y', 'temp']]))
+                [Points, ['x', 'y', 'radius', 'temp']]))
         saveData = pd.DataFrame(columns=cols)
         saveData.index.name = 'frame'
 
@@ -1961,7 +1990,8 @@ class ThermalVideoModel(QObject):
         for point in Points:
             saveData.loc[:, (point, 'x')] = self.tracking_point[point].x
             saveData.loc[:, (point, 'y')] = self.tracking_point[point].y
-
+            saveData.loc[:, (point, 'radius')] = \
+                self.tracking_point[point].radius
             temp = self.tracking_point[point].value_ts
             saveData.loc[:, (point, 'temp')] = temp
 
@@ -1974,18 +2004,21 @@ class ThermalVideoModel(QObject):
             # saveData.loc[:, (point, 'temp_lpf')] = lpf_ts
 
         # Save as csv
-        # Get point properties
+        saveData.to_csv(fname, quoting=csv.QUOTE_NONNUMERIC)
+
+        # Append point properties
         point_property = {}
         for point in self.tracking_point.keys():
             point_property[point] = {
-                'radius': self.tracking_point[point].radius,
                 'aggfunc': self.tracking_point[point].aggfunc,
                 'color': self.tracking_mark[point]['pen_color']}
 
+        with open(fname, 'r') as fd:
+            C = fd.read()
+
+        C = f'# TVT export,{str(point_property)}\n' + C
         with open(fname, 'w') as fd:
-            print(f'TVT export,{str(point_property)}', file=fd)
-            fd.write(saveData.to_csv(quoting=csv.QUOTE_NONNUMERIC,
-                                     encoding='cp932'))
+            fd.write(C)
 
     # --- DeepLabCut interface ------------------------------------------------
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -2030,7 +2063,7 @@ class ThermalVideoModel(QObject):
             conf_file, _ = QFileDialog.getOpenFileName(
                     self.main_win, "DLC config", str(st_dir),
                     "config yaml files (config_*.yaml);;yaml (*.yaml)",
-                    None, QFileDialog.DontUseNativeDialog)
+                    None)
 
             if conf_file == '':
                 return
@@ -2184,8 +2217,7 @@ class ThermalVideoModel(QObject):
             stdir = self.videoData.filename.parent
             fileName, _ = QFileDialog.getOpenFileName(
                     self.main_win, "Open tracking file", str(stdir),
-                    "csv files (*.csv)", None, QFileDialog.DontUseNativeDialog)
-
+                    "csv files (*.csv)", None)
             if fileName == '':
                 return
 
@@ -2197,7 +2229,9 @@ class ThermalVideoModel(QObject):
             cols = [col for col in track_df.columns
                     if len(col[0]) and 'Unnamed' not in col[0]]
             cols = pd.MultiIndex.from_tuples(cols)
-            point_property = eval(head.rstrip().replace('TVT export,', ''))
+            point_property = eval(
+                ','.join([p for p in head.rstrip().split(',')[1:]
+                          if len(p) > 0]))
         else:
             cols = track_df.columns
             point_property = {}
@@ -2240,6 +2274,8 @@ class ThermalVideoModel(QObject):
                 lh = track_df[point].likelihood.values
             if 'temp' in track_df[point].columns:
                 temp = track_df[point].temp.values
+            if 'radius' in track_df[point].columns:
+                radius = track_df[point].radius.values
 
             if data_time == 'video':
                 # Resample tracking points in thermal video timings
@@ -2259,12 +2295,19 @@ class ThermalVideoModel(QObject):
                     interp_temp = interpolate.interp1d(video_times, temp)
                     temp = interp_temp(thermo_times)
 
+                if 'radius' in track_df[point].columns:
+                    interp_radius = interpolate.interp1d(video_times, radius)
+                    radius = interp_radius(thermo_times).astype(int)
+                    radius[radius == 0] = 1
+
             res_track_df.loc[:, (point, 'x')] = x
             res_track_df.loc[:, (point, 'y')] = y
             if 'likelihood' in track_df[point].columns:
                 res_track_df.loc[:, (point, 'likelihood')] = lh
             if 'temp' in track_df[point].columns:
                 res_track_df.loc[:, (point, 'temp')] = temp
+            if 'radius' in track_df[point].columns:
+                res_track_df.loc[:, (point, 'radius')] = radius
 
         # --- Set tracking_points ---------------------------------------------
         currentFrm = self.thermalData.frame_position
@@ -2304,22 +2347,29 @@ class ThermalVideoModel(QObject):
             self.tracking_point[point].x[:] = np.nan
             self.tracking_point[point].y[:] = np.nan
             self.tracking_point[point].value_ts[:] = np.nan
-            self.tracking_point[point].set_position(valid_x, valid_y,
-                                                    valid_frms)
+            self.tracking_point[point].set_position(
+                valid_x, valid_y, frame_indices=valid_frms)
 
             if 'temp' in res_track_df[point].columns:
                 self.tracking_point[point].value_ts = \
                     res_track_df[point]['temp'].values
 
+            if 'radius' in res_track_df[point].columns:
+                self.tracking_point[point].radisu = \
+                    res_track_df[point]['radius'].values
+
             if point in point_property:
-                self.tracking_point[point].radius = \
-                    point_property[point]['radius']
+                if 'radius' not in res_track_df[point].columns and \
+                        'radius' in point_property[point]:
+                    self.tracking_point[point].radius[:] = \
+                        point_property[point]['radius']
+
                 self.tracking_point[point].aggfunc = \
                     point_property[point]['aggfunc']
                 self.tracking_mark[point]['aggfunc'] = \
                     point_property[point]['aggfunc']
                 self.tracking_mark[point]['rad'] = \
-                    point_property[point]['radius']
+                    self.tracking_point[point].radius[currentFrm]
                 if 'color' in point_property[point]:
                     self.tracking_mark[point]['pen_color'] = \
                         point_property[point]['color']
@@ -2354,8 +2404,7 @@ class ThermalVideoModel(QObject):
 
             fname, _ = QFileDialog.getSaveFileName(
                     self.main_win, "Save setting filename", str(stdir),
-                    "pkl (*.pkl);;all (*.*)", None,
-                    QFileDialog.DontUseNativeDialog)
+                    "pkl (*.pkl);;all (*.*)", None)
             if fname == '':
                 return
 
@@ -2412,9 +2461,9 @@ class ThermalVideoModel(QObject):
 
         # thermal_clim
         thermal_clim_fix = \
-            self.main_win.thermal_clim_fix_chbx.checkState().value
+            self.main_win.thermal_clim_fix_chbx.checkState()
         settings['thermal_clim_fix'] = thermal_clim_fix
-        if thermal_clim_fix > 0:
+        if thermal_clim_fix != Qt.CheckState.Unchecked:
             settings['thermal_clim_min'] = \
                 self.main_win.thermal_clim_min_spbx.value()
             settings['thermal_clim_max'] = \
@@ -2464,7 +2513,7 @@ class ThermalVideoModel(QObject):
             stdir = self.DATA_ROOT / 'work_state'
             fname, _ = QFileDialog.getOpenFileName(
                 self.main_win, "Open state file", str(stdir),
-                "pickle (*.pkl)", None, QFileDialog.DontUseNativeDialog)
+                "pickle (*.pkl)", None)  # , QFileDialog.DontUseNativeDialog)
             if fname == '':
                 return
 
@@ -2585,6 +2634,10 @@ class ThermalVideoModel(QObject):
                 for k, v in dobj.items():
                     if hasattr(self.tracking_point[lab], k):
                         setattr(self.tracking_point[lab], k, v)
+                        if k == 'radius' and type(v) is int:
+                            self.tracking_point[lab].radius = \
+                                np.ones_like(self.tracking_point[lab].x,
+                                             dtype=int) * v
 
             if len(self.tracking_point):
                 for point_name, tm in settings['tracking_mark'].items():
@@ -2596,7 +2649,8 @@ class ThermalVideoModel(QObject):
                     self.main_win.videoDispImg.tracking_mark = \
                         self.tracking_mark
 
-                del settings['tracking_mark']
+                if 'tracking_mark' in settings:
+                    del settings['tracking_mark']
 
                 if 'current_point_name' in settings:
                     point_name = settings['current_point_name']
@@ -2604,9 +2658,11 @@ class ThermalVideoModel(QObject):
                     point_name = list(self.tracking_point.keys())[0]
 
                 self.edit_tracking_point(point_name)
-                del settings['current_point_name']
+                if 'current_point_name' in settings:
+                    del settings['current_point_name']
 
-            del settings['tracking_point']
+            if 'tracking_point' in settings:
+                del settings['tracking_point']
 
         # Set lpf
         # if 'lpf' in settings:
@@ -2651,6 +2707,18 @@ class ThermalVideoModel(QObject):
         conf = {'DATA_ROOT': str(self.DATA_ROOT)}
         with open(self.conf_f, 'w') as fd:
             json.dump(conf, fd)
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def show_focus(self):
+        pass
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def focus_filter(self):
+        pass
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def remove_temprature_outlier(self):
+        pass
 
 
 # %% View class : MainWindow ==================================================
@@ -2743,6 +2811,12 @@ class MainWindow(QMainWindow):
         self.thermalFrameFwdBtn.setIcon(
                 self.style().standardIcon(QStyle.SP_MediaSeekForward))
 
+        # Frame position
+        self.thermalFramePosLab = QLabel('frame:')
+        self.thermalFramePosSpBox = QSpinBox()
+        self.thermalFramePosLab.setEnabled(False)
+        self.thermalFramePosSpBox.setEnabled(False)
+
         # --- Video image widget ----------------------------------------------
         # Load video data button
         self.loadVideoDataBtn = QPushButton('Load video data')
@@ -2791,6 +2865,12 @@ class MainWindow(QMainWindow):
         self.videoFrameBkwBtn.setEnabled(False)
         self.videoFrameBkwBtn.setIcon(
                 self.style().standardIcon(QStyle.SP_MediaSeekBackward))
+
+        # Frame position
+        self.videoFramePosLab = QLabel('frame:')
+        self.videoFramePosSpBox = QSpinBox()
+        self.videoFramePosLab.setEnabled(False)
+        self.videoFramePosSpBox.setEnabled(False)
 
         # synch button
         self.syncVideoBtn = QPushButton('Sync video to thermal')
@@ -2877,6 +2957,9 @@ class MainWindow(QMainWindow):
 
         self.roi_rad_spbx = QSpinBox()
         self.roi_rad_spbx.setMinimum(1)
+        self.roi_rad_spbx.setMaximum(10000)
+
+        self.roi_rad_applyAll_btn = QPushButton('Apply all')
 
         self.roi_editRange_cmbbx = QComboBox()
         self.roi_editRange_cmbbx.setEditable(False)
@@ -2995,6 +3078,7 @@ class MainWindow(QMainWindow):
         self.roi_x_spbx.valueChanged.connect(self.model.edit_point_property)
         self.roi_y_spbx.valueChanged.connect(self.model.edit_point_property)
         self.roi_rad_spbx.valueChanged.connect(self.model.edit_point_property)
+        self.roi_rad_applyAll_btn.clicked.connect(self.model.apply_radius_all)
         self.roi_editRange_cmbbx.currentIndexChanged.connect(
                 self.model.set_editRange)
         self.roi_color_cmbbx.currentIndexChanged.connect(
@@ -3074,7 +3158,8 @@ class MainWindow(QMainWindow):
         roiCtrlLayout.addWidget(self.roi_y_spbx, 5, 1)
         roiCtrlLayout.addWidget(self.roi_erase_btn, 5, 2)
         roiCtrlLayout.addWidget(QLabel('Radius:'), 6, 0)
-        roiCtrlLayout.addWidget(self.roi_rad_spbx, 6, 1, 1, 2)
+        roiCtrlLayout.addWidget(self.roi_rad_spbx, 6, 1)
+        roiCtrlLayout.addWidget(self.roi_rad_applyAll_btn, 6, 2)
         roiCtrlLayout.addWidget(QLabel('Aggregation:'), 7, 0)
         roiCtrlLayout.addWidget(self.roi_aggfunc_cmbbx, 7, 1, 1, 2)
         roiCtrlLayout.addWidget(self.roi_val_lab, 8, 0, 1, 1)
@@ -3127,6 +3212,8 @@ class MainWindow(QMainWindow):
         thermalCtrlLayout.addWidget(self.thermalFrameBkwBtn)
         thermalCtrlLayout.addWidget(self.thermalFrameFwdBtn)
         thermalCtrlLayout.addWidget(self.thermalSkipFwdBtn)
+        thermalCtrlLayout.addWidget(self.thermalFramePosLab)
+        thermalCtrlLayout.addWidget(self.thermalFramePosSpBox)
         thermalCtrlLayout.addStretch()
         thermalLayout.addLayout(thermalCtrlLayout)
 
@@ -3155,6 +3242,8 @@ class MainWindow(QMainWindow):
         videoCtrlLayout.addWidget(self.videoFrameBkwBtn)
         videoCtrlLayout.addWidget(self.videoFrameFwdBtn)
         videoCtrlLayout.addWidget(self.videoSkipFwdBtn)
+        videoCtrlLayout.addWidget(self.videoFramePosLab)
+        videoCtrlLayout.addWidget(self.videoFramePosSpBox)
         videoCtrlLayout.addStretch()
         videoLayout.addLayout(videoCtrlLayout)
 
@@ -3328,6 +3417,28 @@ class MainWindow(QMainWindow):
         action.setStatusTip('Load positions tracked by DeepLabCut')
         action.triggered.connect(self.model.load_tracking)
         dlcMenu.addAction(action)
+
+        # -- Filter menu --
+        filterMenu = menuBar.addMenu('Filter')
+
+        # Show Focus level
+        showFocusAction = QAction('Show Image Focus Level', self)
+        showFocusAction.setStatusTip('Show blurring level')
+        showFocusAction.triggered.connect(self.model.show_focus)
+        filterMenu.addAction(showFocusAction)
+
+        # Filter Focus
+        focusFilterAction = QAction('Image Focus filter', self)
+        focusFilterAction.setStatusTip('Filtering blurred frames')
+        focusFilterAction.triggered.connect(self.model.focus_filter)
+        filterMenu.addAction(focusFilterAction)
+
+        # Filter Temprature outlier
+        tempOutlierFilterAction = QAction('Temperature outlier', self)
+        tempOutlierFilterAction.setStatusTip('Remove temperature outliers')
+        tempOutlierFilterAction.triggered.connect(
+            self.model.remove_temprature_outlier)
+        filterMenu.addAction(tempOutlierFilterAction)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def thermal_cbar_lab_resizeEvent(self, ev):

@@ -13,18 +13,18 @@ View Model class: ViewModel
 
 INstall note
 ------------
-Install Anaconda 3
+Install miniconda 3
     https://www.anaconda.com/distribution/
 
-Create deeplabcut environment
-    Download environment yaml file from,
-        http://www.mackenziemathislab.org/s/DEEPLABCUT.yaml
-
-    Create conda environment
-        conda env create -f DEPLABCUT.yaml
+Create TVT environment
+    sudo apt install exiftool git build-essential libgtk-3-dev -y
+    cd
+    git clone https://github.com/mamisaki/TVT.git
+    cd ~/TVT
+    conda env create -f TVT_linux.yaml
 
     Activate the environment
-        conda activate DEPLABCUT
+        conda activate TVT
 
 """
 
@@ -296,6 +296,7 @@ class DLC_GUI(QObject):
             'frBkwBtn': self.main_win.videoFrameBkwBtn,
             'skipFwdBtn': self.main_win.videoSkipFwdBtn,
             'skipBkwBtn': self.main_win.videoSkipBkwBtn,
+            'framePosSpBox': self.main_win.videoFramePosSpBox,
             'positionLabel': self.main_win.videoPositionLab}
         self.videoData = VideoDataMovie(self, self.main_win.videoDispImg,
                                         self.video_UI_objs)
@@ -1383,9 +1384,9 @@ class DLC_GUI(QObject):
             if lh_thresh is None:
                 lh_thresh, ok = QInputDialog.getDouble(
                     self.main_win, 'Likelihood',
-                    'Likelihood threshold:', value=0.9,
+                    'Likelihood threshold:', value=0.3,
                     minValue=0.0, maxValue=1.0,
-                    decimals=2)
+                    decimals=2, step=0.01)
                 if not ok:
                     return
 
@@ -1637,7 +1638,8 @@ class DLC_GUI(QObject):
                     point_name = list(self.tracking_point.keys())[0]
 
                 self.edit_tracking_point(point_name)
-                del settings['current_point_name']
+                if 'current_point_name' in settings:
+                    del settings['current_point_name']
 
             del settings['tracking_point']
 
@@ -1761,6 +1763,12 @@ class ViewWindow(QMainWindow):
         self.videoFrameBkwBtn.setEnabled(False)
         self.videoFrameBkwBtn.setIcon(
                 self.style().standardIcon(QStyle.SP_MediaSeekBackward))
+
+        # Frame position
+        self.videoFramePosLab = QLabel('frame:')
+        self.videoFramePosSpBox = QSpinBox()
+        self.videoFramePosLab.setEnabled(False)
+        self.videoFramePosSpBox.setEnabled(False)
 
         # Play button
         self.playBtn = QPushButton()
@@ -1930,6 +1938,7 @@ class ViewWindow(QMainWindow):
         videoCtrlLayout.addWidget(self.playBtn)
         videoCtrlLayout.addWidget(self.videoFrameFwdBtn)
         videoCtrlLayout.addWidget(self.videoSkipFwdBtn)
+        videoCtrlLayout.addWidget(self.videoFramePosSpBox)
         videoCtrlLayout.addStretch()
         videoLayout.addLayout(videoCtrlLayout)
 
