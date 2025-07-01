@@ -1,0 +1,17 @@
+# TVT.yaml
+name: TVT
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - ipython
+  - jupyter
+  - ffmpeg
+  - pytables==3.8.0
+  - pip:
+    - torch
+    - torchvision
+    - "deeplabcut[gui]==3.0.0rc10"
+  - ffmpeg-python
