@@ -13,9 +13,7 @@ dependencies:
   - ffmpeg
   - pytables==3.8.0
   - pip:
-    - "deeplabcut[gui,modelzoo,wandb]==2.3.10"
-    - tensorflow<=2.10
-    - tensorpack
-    - tf-slim
-    - tensorrt
+    - torch
+    - torchvision
+    - "deeplabcut[gui]"
   - ffmpeg-python
