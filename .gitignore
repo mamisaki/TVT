@@ -17,4 +17,4 @@ etc/conda/deactivate.d/env_vars.sh
 data/*
 TVT_data/*
 cock_miyagawa/*
-
+.vscode
