@@ -3991,6 +3991,9 @@ class MainWindow(QMainWindow):
 
         # --- Thermal cmap edit widget ----------------------------------------
         self.cmap_grpbx = QGroupBox("Color")
+        self.cmap_grpbx.setStyleSheet(
+            "QGroupBox { font-size: 14pt; font-weight: bold; }"
+        )
         self.thermal_cbar_lab = QLabel()
         colorbar = np.reshape(np.arange(0, 256, dtype=np.uint8), [-1, 1])
         colorbar = np.tile(colorbar, 10).copy()
@@ -4013,6 +4016,9 @@ class MainWindow(QMainWindow):
 
         # --- Marker widgets --------------------------------------------------
         self.tmark_grpbx = QGroupBox("Time marker")
+        self.tmark_grpbx.setStyleSheet(
+            "QGroupBox { font-size: 14pt; font-weight: bold; }"
+        )
         self.tmark_add_btn = QPushButton("Add")
         self.tmark_name_cmbbx = QComboBox()
         self.tmark_name_cmbbx.setEditable(True)
@@ -4023,6 +4029,9 @@ class MainWindow(QMainWindow):
         # --- Tracking point edit widgets -------------------------------------
         self.roi_ctrl_grpbx = QGroupBox(
             "Tracking points (shift+double-click to add)"
+        )
+        self.roi_ctrl_grpbx.setStyleSheet(
+            "QGroupBox { font-size: 14pt; font-weight: bold; }"
         )
         self.roi_ctrl_grpbx.setEnabled(False)
 
@@ -4046,7 +4055,7 @@ class MainWindow(QMainWindow):
         self.roi_rad_spbx.setMinimum(1)
         self.roi_rad_spbx.setMaximum(10000)
 
-        self.roi_rad_applyAll_btn = QPushButton("Apply all")
+        self.roi_rad_applyAll_btn = QPushButton("Rad. apply all")
 
         self.roi_editRange_cmbbx = QComboBox()
         self.roi_editRange_cmbbx.setEditable(False)
@@ -4077,7 +4086,7 @@ class MainWindow(QMainWindow):
         self.roi_online_plot_chbx.setChecked(True)
         self.roi_plot_btn = QPushButton("Reload all temp")
         self.roi_plot_btn.setStyleSheet("background:#ffa500; color:black;")
-        self.roi_LPF_lb = QLabel("Low-pass filter (Hz)")
+        self.roi_LPF_lb = QLabel("Low-pass (Hz)")
         self.roi_LPF_enable_chbx = QCheckBox("Show LPF")
         self.roi_LPF_enable_chbx.setChecked(True)
         self.roi_LPF_thresh_spbx = QDoubleSpinBox()
@@ -4307,22 +4316,15 @@ class MainWindow(QMainWindow):
         row_point.addWidget(self.roi_delete_btn)
         roiCtrlLayout.addLayout(row_point)
 
-        row_name = QHBoxLayout()
-        row_name.setContentsMargins(0, 0, 0, 0)
-        row_name.setSpacing(4)
-        row_name.addWidget(QLabel("Name:"))
-        row_name.addWidget(self.roi_name_ledit)
-        row_name.addWidget(self.roi_showName_chbx)
-        roiCtrlLayout.addLayout(row_name)
-
-        row_color = QHBoxLayout()
-        row_color.setContentsMargins(0, 0, 0, 0)
-        row_color.setSpacing(4)
-        row_color.addWidget(QLabel("Color:"))
-        row_color.addWidget(self.roi_color_cmbbx)
-        row_color.addWidget(QLabel("Edit range:"))
-        row_color.addWidget(self.roi_editRange_cmbbx)
-        roiCtrlLayout.addLayout(row_color)
+        row_name_color = QHBoxLayout()
+        row_name_color.setContentsMargins(0, 0, 0, 0)
+        row_name_color.setSpacing(4)
+        row_name_color.addWidget(QLabel("Name:"))
+        row_name_color.addWidget(self.roi_name_ledit)
+        row_name_color.addWidget(self.roi_showName_chbx)
+        row_name_color.addWidget(QLabel(" Color:"))
+        row_name_color.addWidget(self.roi_color_cmbbx)
+        roiCtrlLayout.addLayout(row_name_color)
 
         row_pos = QHBoxLayout()
         row_pos.setContentsMargins(0, 0, 0, 0)
@@ -4336,8 +4338,9 @@ class MainWindow(QMainWindow):
         row_pos_actions = QHBoxLayout()
         row_pos_actions.setContentsMargins(0, 0, 0, 0)
         row_pos_actions.setSpacing(4)
-        row_pos_actions.addStretch()
         row_pos_actions.addWidget(self.roi_erase_btn)
+        row_pos_actions.addWidget(QLabel("Erase range:"))
+        row_pos_actions.addWidget(self.roi_editRange_cmbbx)
         row_pos_actions.addStretch()
         row_pos_actions.addWidget(self.roi_rad_applyAll_btn)
         roiCtrlLayout.addLayout(row_pos_actions)
@@ -4345,23 +4348,23 @@ class MainWindow(QMainWindow):
         row_agg = QHBoxLayout()
         row_agg.setContentsMargins(0, 0, 0, 0)
         row_agg.setSpacing(4)
-        row_agg.addWidget(QLabel("Aggregation:"))
+        row_agg.addWidget(QLabel("Agg.:"))
         row_agg.addWidget(self.roi_aggfunc_cmbbx)
         row_agg.addStretch()
-        row_agg.addWidget(self.roi_val_lab)
-        row_agg.addWidget(self.roi_jump_min_btn)
-        row_agg.addWidget(self.roi_jump_max_btn)
+        row_agg.addWidget(self.roi_LPF_lb)
+        row_agg.addWidget(self.roi_LPF_thresh_spbx)
+        row_agg.addWidget(self.roi_LPF_enable_chbx)
         roiCtrlLayout.addLayout(row_agg)
 
-        row_lpf = QHBoxLayout()
-        row_lpf.setContentsMargins(0, 0, 0, 0)
-        row_lpf.setSpacing(4)
-        row_lpf.addWidget(self.roi_LPF_lb)
-        row_lpf.addWidget(self.roi_LPF_enable_chbx)
-        row_lpf.addWidget(self.roi_LPF_thresh_spbx)
-        row_lpf.addStretch()
-        row_lpf.addWidget(self.roi_jump_outlier_btn)
-        roiCtrlLayout.addLayout(row_lpf)
+        row_jump = QHBoxLayout()
+        row_jump.setContentsMargins(0, 0, 0, 0)
+        row_jump.setSpacing(4)
+        row_jump.addWidget(self.roi_val_lab)
+        row_jump.addWidget(self.roi_jump_min_btn)
+        row_jump.addWidget(self.roi_jump_max_btn)
+        row_jump.addWidget(self.roi_jump_outlier_btn)
+        row_jump.addStretch()
+        roiCtrlLayout.addLayout(row_jump)
 
         self.roi_ctrl_grpbx.resize(self.roi_ctrl_grpbx.sizeHint())
 
