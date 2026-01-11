@@ -11,9 +11,9 @@ Model classes :
     ThermalDataMovie :
         Thermal data movie model class.
 
-View classe:
+View classes:
     MainWindow:
-        Mian GUI window.
+        Main GUI window.
 
     TVTDisplayImage:
         Display image class.
@@ -21,8 +21,10 @@ View classe:
 
 # %% import ===================================================================
 from pathlib import Path, PurePath
+import ast
 import sys
 import os
+import copy
 from datetime import datetime, timedelta
 import re
 from functools import partial
@@ -56,7 +58,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QVBoxLayout,
     QHBoxLayout,
-    QGridLayout,
     QDialog,
     QLabel,
     QSizePolicy,
@@ -75,7 +76,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
 )
 
-from PySide6.QtGui import QImage, QPixmap, QAction
+from PySide6.QtGui import QImage, QPixmap, QAction, QKeySequence
 
 # https://matplotlib.org/3.1.0/gallery/user_interfaces/embedding_in_qt_sgskip.html
 from matplotlib.backends.backend_qtagg import (
@@ -304,7 +305,7 @@ class VideoDataMovie(DataMovie):
         scaleMtx[0, 0] = xscale
         scaleMtx[1, 1] = yscale
 
-        # Coordinate transformation matrix of thermo to video image
+        # Coordinate transformation matrix of thermal to video image
         self.shift_scale_Mtx = np.dot(shiftMtx, scaleMtx)
         self.dispImg.shift_scale_Mtx = self.shift_scale_Mtx
 
@@ -410,6 +411,41 @@ class ThermalDataMovie(DataMovie):
             progressDlg.close()
             self.thermal_data_reader.progressDlg = None
 
+        # Validate reader
+        if self.thermal_data_reader is None:
+            QMessageBox.critical(
+                self.model.main_win,
+                "Load thermal data",
+                "Failed to open thermal file.",
+            )
+            return
+
+        if not hasattr(self.thermal_data_reader, "FrameRate") or not hasattr(
+            self.thermal_data_reader, "Count"
+        ):
+            QMessageBox.critical(
+                self.model.main_win,
+                "Load thermal data",
+                "Thermal file missing frame metadata.",
+            )
+            return
+
+        if self.thermal_data_reader.Count <= 0:
+            QMessageBox.critical(
+                self.model.main_win,
+                "Load thermal data",
+                "Thermal file has zero frames.",
+            )
+            return
+
+        if self.thermal_data_reader.FrameRate <= 0:
+            QMessageBox.critical(
+                self.model.main_win,
+                "Load thermal data",
+                "Thermal file has invalid frame rate.",
+            )
+            return
+
         self.frame_rate = self.thermal_data_reader.FrameRate
         self.frame_rate = int(self.frame_rate * 100) / 100
 
@@ -457,8 +493,12 @@ class ThermalDataMovie(DataMovie):
         try:
             # --- read frame ---
             frame_data = self.thermal_data_reader.getFramebyIdx(frame_idx)
-            frame_time = frame_idx * (1.0 / self.frame_rate)
-            success = True
+            if frame_data is None:
+                success = False
+                frame_time = None
+            else:
+                frame_time = frame_idx * (1.0 / self.frame_rate)
+                success = True
 
         except Exception:
             success = False
@@ -590,15 +630,7 @@ class ThermalDataMovie(DataMovie):
         super(ThermalDataMovie, self).show_frame(
             frame_idx, common_time_ms, sync_update
         )
-
-        if self.model.main_win.plot_timeline is not None:
-            xpos = self.model.main_win.plot_xvals[self.frame_position]
-            if self.model.main_win.plot_timeline.get_xdata()[0] != xpos:
-                if len(self.model.main_win.plot_line) == 0:
-                    self.model.main_win.plot_ax.set_ylim([0, 1])
-                self.model.main_win.plot_timeline.set_xdata([xpos, xpos])
-                # blit を使用して部分的な再描画を行う
-                self.model.main_win.roi_plot_canvas.draw_idle()
+        self.model.move_timeline_marker(self.frame_position)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def get_rois_dataseries(self, points_ts, rads, aggfunc):
@@ -822,7 +854,7 @@ class ThermalVideoModel(QObject):
             self.main_win.thermalDispImg.tracking_mark = self.tracking_mark
         self.editRange = "current"
 
-        # self.lpf = 0  # Hz, 0 == No filter
+        self.lpf_hz = 0.0  # Hz, 0 == no filter
 
         # --- Common time (ms), movie parameters ------------------------------
         self.common_time_ms = 0
@@ -839,6 +871,12 @@ class ThermalVideoModel(QObject):
         self.time_marker = {}
         self.tracking_point = dict()  # tracking point temperatures values
         self.editRange = "current"
+
+        # --- Edit history (undo/redo) ------------------------------------
+        self.max_edit_history = 20
+        self.edit_history = []
+        self.edit_history_idx = -1
+        self._disable_history = False
 
         # --- DeepLabCut interface --------------------------------------------
         self.dlci = DLCinter(self.DATA_ROOT, ui_parent=self.main_win)
@@ -869,6 +907,7 @@ class ThermalVideoModel(QObject):
                     "Recover state",
                     "Recover the last aborted state?",
                     QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes,
                 )
                 if ret == QMessageBox.Yes:
                     self.load_status(fname=self.tmp_state_f)
@@ -878,9 +917,163 @@ class ThermalVideoModel(QObject):
                     "Load last state",
                     "Retrieve the last working state?",
                     QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes,
                 )
                 if ret == QMessageBox.Yes:
                     self.load_status(fname=last_state_f)
+
+    # --- Edit history helpers -----------------------------------------------
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def _clone_tracking_point_map(self, src_map):
+        cloned = {}
+        for name, tp in src_map.items():
+            new_tp = TrackingPoint(tp.dataMovie, name=tp.name)
+            new_tp.frequency = tp.frequency
+            new_tp.x = tp.x.copy()
+            new_tp.y = tp.y.copy()
+            new_tp.radius = tp.radius.copy()
+            new_tp.aggfunc = tp.aggfunc
+            new_tp.value_ts = tp.value_ts.copy()
+            cloned[name] = new_tp
+        return cloned
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def _capture_edit_state(self):
+        return {
+            "tracking_point": self._clone_tracking_point_map(
+                self.tracking_point
+            ),
+            "tracking_mark": copy.deepcopy(self.tracking_mark),
+            "time_marker": copy.deepcopy(self.time_marker),
+            "current_point_name": self.main_win.roi_idx_cmbbx.currentText(),
+            "common_time_ms": self.common_time_ms,
+        }
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def _restore_edit_state(self, state):
+        self._disable_history = True
+        try:
+            self.tracking_point = self._clone_tracking_point_map(
+                state.get("tracking_point", {})
+            )
+            self.tracking_mark = copy.deepcopy(state.get("tracking_mark", {}))
+            self.time_marker = copy.deepcopy(state.get("time_marker", {}))
+            self.common_time_ms = state.get(
+                "common_time_ms", self.common_time_ms
+            )
+
+            # Refresh shared references
+            self.main_win.videoDispImg.tracking_mark = self.tracking_mark
+            self.main_win.thermalDispImg.tracking_mark = self.tracking_mark
+
+            # Rebuild ROI combo box
+            self.main_win.roi_idx_cmbbx.blockSignals(True)
+            self.main_win.roi_idx_cmbbx.clear()
+            self.main_win.roi_idx_cmbbx.addItems(
+                sorted(self.tracking_point.keys())
+            )
+            self.main_win.roi_idx_cmbbx.blockSignals(False)
+
+            point_name = state.get("current_point_name")
+            if point_name not in self.tracking_point and len(
+                self.tracking_point
+            ):
+                point_name = sorted(self.tracking_point.keys())[0]
+            elif point_name not in self.tracking_point:
+                point_name = None
+
+            if point_name is not None and len(self.tracking_point):
+                self.select_point_ui(point_name, update_plot=False)
+            else:
+                self.select_point_ui(None, update_plot=False)
+
+            if self.thermalData.loaded:
+                self.show_marker()
+
+            self.update_dispImg()
+            if self.thermalData.loaded and len(self.tracking_point):
+                self.plot_timecourse(
+                    plot_all_points=True,
+                    update_all_data=False,
+                    update_plot=True,
+                    skip_value_update=True,
+                )
+        finally:
+            self._disable_history = False
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def _ensure_history_baseline(self):
+        if self._disable_history:
+            return
+
+        if len(self.edit_history) == 0:
+            self.edit_history.append(self._capture_edit_state())
+            self.edit_history_idx = 0
+            self._update_undo_redo_actions()
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def _record_history_state(self):
+        if self._disable_history:
+            return
+
+        if self.edit_history_idx < len(self.edit_history) - 1:
+            self.edit_history = self.edit_history[: self.edit_history_idx + 1]
+
+        self.edit_history.append(self._capture_edit_state())
+        max_states = self.max_edit_history + 1  # include baseline
+        if len(self.edit_history) > max_states:
+            drop = len(self.edit_history) - max_states
+            self.edit_history = self.edit_history[drop:]
+            self.edit_history_idx -= drop
+
+        self.edit_history_idx = len(self.edit_history) - 1
+        self._update_undo_redo_actions()
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def clear_edit_history(self):
+        self.edit_history = []
+        self.edit_history_idx = -1
+        self._update_undo_redo_actions()
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def reset_history_baseline(self):
+        self.edit_history = [self._capture_edit_state()]
+        self.edit_history_idx = 0
+        self._update_undo_redo_actions()
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def _update_undo_redo_actions(self):
+        if not hasattr(self.main_win, "undoAction"):
+            return
+
+        can_undo = self.edit_history_idx > 0
+        can_redo = (
+            self.edit_history_idx >= 0
+            and self.edit_history_idx < len(self.edit_history) - 1
+        )
+        self.main_win.undoAction.setEnabled(can_undo)
+        self.main_win.redoAction.setEnabled(can_redo)
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def undo_edit(self):
+        if self.edit_history_idx <= 0:
+            return
+
+        self.edit_history_idx -= 1
+        self._restore_edit_state(self.edit_history[self.edit_history_idx])
+        self._update_undo_redo_actions()
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def redo_edit(self):
+        if self.edit_history_idx < 0:
+            return
+
+        if self.edit_history_idx >= len(self.edit_history) - 1:
+            return
+
+        self.edit_history_idx += 1
+        self._restore_edit_state(self.edit_history[self.edit_history_idx])
+        self._update_undo_redo_actions()
 
     # --- Data file handling --------------------------------------------------
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -898,6 +1091,9 @@ class ThermalVideoModel(QObject):
         fileName = Path(fileName)
 
         self.thermalData.open(fileName)
+
+        # Reset undo/redo history for a fresh session
+        self.clear_edit_history()
 
         # Reset
         self.time_marker = {}
@@ -920,15 +1116,27 @@ class ThermalVideoModel(QObject):
             )
             self.main_win.unloadThermalDataBtn.setEnabled(True)
             self.main_win.exportThermalDataVideoBtn.setEnabled(True)
+            self.main_win.exportTrackingVideoBtn.setEnabled(True)
 
-            del self.main_win.plot_ax
             self.main_win.roi_plot_canvas.figure.clear()
-            self.main_win.plot_ax = (
-                self.main_win.roi_plot_canvas.figure.subplots(1, 1)
+            self.main_win.plot_axes = (
+                self.main_win.roi_plot_canvas.figure.subplots(
+                    3, 1, sharex=True
+                )
+            )
+            (
+                self.main_win.plot_ax_temp,
+                self.main_win.plot_ax_x,
+                self.main_win.plot_ax_y,
+            ) = self.main_win.plot_axes
+            self.main_win.roi_plot_canvas.figure.subplots_adjust(
+                left=0.08, bottom=0.1, right=0.94, top=0.96, hspace=0.12
             )
             self.main_win.plot_xvals = None
             self.main_win.plot_line = {}
-            # self.main_win.plot_line_lpf = {}
+            self.main_win.plot_line_lpf = {}
+            self.main_win.plot_line_x = {}
+            self.main_win.plot_line_y = {}
             self.main_win.plot_timeline = None
             self.main_win.plot_marker_line = {}
             self.main_win.roi_plot_canvas.setEnabled(False)
@@ -990,22 +1198,37 @@ class ThermalVideoModel(QObject):
     def unloadThermalData(self):
         self.thermalData.unload()
 
+        # Clear undo/redo history when data is unloaded
+        self.clear_edit_history()
+
         self.time_marker = {}
         self.tracking_mark = dict()  # tracking point marks on display
         if self.main_win is not None:
             self.main_win.unloadThermalDataBtn.setText("---")
             self.main_win.unloadThermalDataBtn.setEnabled(False)
             self.main_win.exportThermalDataVideoBtn.setEnabled(False)
+            self.main_win.exportTrackingVideoBtn.setEnabled(False)
             self.main_win.roi_ctrl_grpbx.setEnabled(False)
 
-            del self.main_win.plot_ax
             self.main_win.roi_plot_canvas.figure.clear()
-            self.main_win.plot_ax = (
-                self.main_win.roi_plot_canvas.figure.subplots(1, 1)
+            self.main_win.plot_axes = (
+                self.main_win.roi_plot_canvas.figure.subplots(
+                    3, 1, sharex=True
+                )
+            )
+            (
+                self.main_win.plot_ax_temp,
+                self.main_win.plot_ax_x,
+                self.main_win.plot_ax_y,
+            ) = self.main_win.plot_axes
+            self.main_win.roi_plot_canvas.figure.subplots_adjust(
+                left=0.08, bottom=0.1, right=0.94, top=0.96, hspace=0.12
             )
             self.main_win.plot_xvals = None
             self.main_win.plot_line = {}
-            # self.main_win.plot_line_lpf = {}
+            self.main_win.plot_line_lpf = {}
+            self.main_win.plot_line_x = {}
+            self.main_win.plot_line_y = {}
             self.main_win.plot_timeline = None
             self.main_win.plot_marker_line = {}
             self.main_win.roi_plot_canvas.setEnabled(False)
@@ -1032,6 +1255,139 @@ class ThermalVideoModel(QObject):
             return
 
         self.openVideoFile(fileName=fileName)
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def export_tracking_video(self):
+        if not self.thermalData.loaded:
+            QMessageBox.critical(
+                self.main_win,
+                "Export tracking video",
+                "No thermal data loaded.",
+            )
+            return
+
+        if len(self.tracking_point) == 0:
+            QMessageBox.information(
+                self.main_win,
+                "Export tracking video",
+                "No tracking points to render.",
+            )
+            return
+
+        stdir = self.thermalData.filename.parent
+        initial_name = stdir / (
+            self.thermalData.filename.stem + "_tracking.mp4"
+        )
+        fname, _ = QFileDialog.getSaveFileName(
+            self.main_win,
+            "Save tracking video",
+            str(initial_name),
+            "mp4 (*.mp4);;all (*.*)",
+            None,
+        )
+        if fname == "":
+            return
+
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        # Use first frame to determine size
+        first_frame = self.thermalData.thermal_data_reader.getFramebyIdx(0)
+        if first_frame is None:
+            QMessageBox.critical(
+                self.main_win,
+                "Export tracking video",
+                "Unable to read first frame.",
+            )
+            return
+
+        height, width = first_frame.shape
+        writer = cv2.VideoWriter(
+            str(fname),
+            fourcc,
+            self.thermalData.frame_rate,
+            (width, height),
+        )
+
+        def hex_to_bgr(hx):
+            hx = hx.lstrip("#")
+            r = int(hx[0:2], 16)
+            g = int(hx[2:4], 16)
+            b = int(hx[4:6], 16)
+            return (b, g, r)
+
+        progressDlg = QProgressDialog(
+            "Export tracking overlay ...",
+            "Cancel",
+            0,
+            self.thermalData.duration_frame,
+            self.main_win,
+        )
+        progressDlg.setWindowTitle("Export tracking video")
+        progressDlg.setWindowModality(Qt.WindowModal)
+        progressDlg.resize(320, 89)
+        progressDlg.show()
+
+        try:
+            for idx in range(self.thermalData.duration_frame):
+                progressDlg.setValue(idx)
+                progressDlg.setLabelText(
+                    "Export tracking overlay ... "
+                    f"({idx + 1}/{self.thermalData.duration_frame})"
+                )
+                progressDlg.repaint()
+                if progressDlg.wasCanceled():
+                    break
+
+                frame = self.thermalData.thermal_data_reader.getFramebyIdx(idx)
+                if frame is None:
+                    continue
+
+                low, high = np.percentile(frame.ravel(), [5, 99.5])
+                scaled = (frame - low) / (high - low + 1e-8)
+                scaled = np.clip(scaled, 0, 1) * 255
+                gray = scaled.astype(np.uint8)
+                color = cv2.applyColorMap(gray, themro_cmap)
+
+                for point, tp in self.tracking_point.items():
+                    x = tp.x[idx]
+                    y = tp.y[idx]
+                    if np.isnan(x) or np.isnan(y):
+                        continue
+                    rad = int(tp.radius[idx]) if idx < len(tp.radius) else 3
+                    col_hex = pen_color_rgb[
+                        self.tracking_mark[point]["pen_color"]
+                    ]
+                    if col_hex == "#ffffff":
+                        col_hex = "#000000"
+                    bgr = hex_to_bgr(col_hex)
+                    cv2.circle(
+                        color,
+                        (int(x), int(y)),
+                        max(1, rad),
+                        bgr,
+                        2,
+                        lineType=cv2.LINE_AA,
+                    )
+                    cv2.putText(
+                        color,
+                        point,
+                        (int(x) + rad + 2, int(y) - rad - 2),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.35,
+                        bgr,
+                        1,
+                        lineType=cv2.LINE_AA,
+                    )
+
+                writer.write(color)
+        finally:
+            writer.release()
+            progressDlg.close()
+
+        QMessageBox.information(
+            self.main_win,
+            "Export tracking video",
+            f"Saved tracking video to\n{fname}",
+        )
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def openVideoFile(self, *args, fileName=None, **kwargs):
@@ -1074,7 +1430,7 @@ class ThermalVideoModel(QObject):
 
         self.main_win.unloadVideoDataBtn.setEnabled(True)
 
-        # Sync video to thermo if framerate and number of frames are same
+        # Sync video to thermal if framerate and number of frames match
         if not self.thermalData.loaded:
             return
 
@@ -1102,7 +1458,7 @@ class ThermalVideoModel(QObject):
 
         # --- Off synch ---
         if not self.on_sync:
-            self.main_win.syncVideoBtn.setText("Sync video to thermo")
+            self.main_win.syncVideoBtn.setText("Sync video to thermal")
             if self.main_win.syncVideoBtn.isChecked():
                 self.main_win.syncVideoBtn.blockSignals(True)
                 self.main_win.syncVideoBtn.setChecked(False)
@@ -1116,7 +1472,7 @@ class ThermalVideoModel(QObject):
             self.on_sync = False
             self.main_win.syncVideoBtn.blockSignals(True)
             self.main_win.syncVideoBtn.setChecked(False)
-            self.main_win.syncVideoBtn.setText("Sync video to thermo")
+            self.main_win.syncVideoBtn.setText("Sync video to thermal")
             self.main_win.syncVideoBtn.blockSignals(False)
             return
 
@@ -1159,7 +1515,7 @@ class ThermalVideoModel(QObject):
             self.main_win.syncVideoBtn.setChecked(True)
             self.main_win.syncVideoBtn.blockSignals(False)
 
-        self.main_win.syncVideoBtn.setText("Unsync video to thermo")
+        self.main_win.syncVideoBtn.setText("Unsync video from thermal")
 
     # --- Common movie control functions --------------------------------------
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1303,7 +1659,7 @@ class ThermalVideoModel(QObject):
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def select_point_ui(self, point_name=None, update_plot=True):
-        """chnage tracking point
+        """Change tracking point selection.
         If point_name is not in self.tracking_mark, the point was deleted.
         """
         if point_name is None:
@@ -1317,6 +1673,7 @@ class ThermalVideoModel(QObject):
         self.main_win.roi_rad_spbx.blockSignals(True)
         self.main_win.roi_aggfunc_cmbbx.blockSignals(True)
         self.main_win.roi_color_cmbbx.blockSignals(True)
+        self.main_win.roi_showTemp_chbx.blockSignals(True)
 
         if point_name in self.tracking_mark:
             frame = self.thermalData.frame_position
@@ -1342,6 +1699,12 @@ class ThermalVideoModel(QObject):
                 self.tracking_mark[point_name]["pen_color"]
             )
 
+            show_temp = self.tracking_mark[point_name].get(
+                "show_temp", True
+            )
+            self.tracking_mark[point_name]["show_temp"] = show_temp
+            self.main_win.roi_showTemp_chbx.setChecked(show_temp)
+
             val = self.tracking_point[point_name].get_value([frame])[0]
 
             if np.isnan(val):
@@ -1361,6 +1724,7 @@ class ThermalVideoModel(QObject):
                 tracking_point_pen_color_default
             )
             self.main_win.roi_val_lab.setText("Temp. ----- °C")
+            self.main_win.roi_showTemp_chbx.setChecked(True)
 
         # unblock signals
         self.main_win.roi_idx_cmbbx.blockSignals(False)
@@ -1370,14 +1734,19 @@ class ThermalVideoModel(QObject):
         self.main_win.roi_rad_spbx.blockSignals(False)
         self.main_win.roi_aggfunc_cmbbx.blockSignals(False)
         self.main_win.roi_color_cmbbx.blockSignals(False)
+        self.main_win.roi_showTemp_chbx.blockSignals(False)
 
         if update_plot:
             self.plot_timecourse()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def edit_tracking_point(self, point_name):
+    def edit_tracking_point(self, point_name, record_history=True):
         if not self.thermalData.loaded:
             return
+
+        changed = False
+        if record_history and not self._disable_history:
+            self._ensure_history_baseline()
 
         # --- Set max position (frame can be larger than the image) -----------
         if self.thermalData.loaded:
@@ -1397,10 +1766,13 @@ class ThermalVideoModel(QObject):
         if point_name not in self.tracking_mark.keys():
             # point_name is deleted
             del self.tracking_point[point_name]
+            changed = True
         else:
             # --- Check properties in self.tracking_mark[k] -------------------
             x = self.tracking_mark[point_name]["x"]
             y = self.tracking_mark[point_name]["y"]
+            if "show_temp" not in self.tracking_mark[point_name]:
+                self.tracking_mark[point_name]["show_temp"] = True
 
             # Set position values in main_win
             if x > xmax:
@@ -1417,10 +1789,11 @@ class ThermalVideoModel(QObject):
 
             # --- Edit tracking point time series -----------------------------
             if point_name in self.tracking_point:
-                # Edit existing trcking point time series
+                # Edit existing tracking point time series
                 self.tracking_point[point_name].set_position(
                     x, y, update_frames=True
                 )
+                changed = True
             else:
                 # Make a new tracking point time series for thermalData
                 self.tracking_point[point_name] = TrackingPoint(
@@ -1438,6 +1811,7 @@ class ThermalVideoModel(QObject):
                 self.tracking_mark[point_name]["pen_color"] = (
                     tracking_point_pen_color_default
                 )
+                self.tracking_mark[point_name]["show_temp"] = True
 
                 # Set the point positions
                 frame_indices = np.arange(
@@ -1450,6 +1824,7 @@ class ThermalVideoModel(QObject):
                     frame_indices=frame_indices,
                     update_frames=[self.thermalData.frame_position],
                 )
+                changed = True
 
         # update display
         self.update_dispImg()
@@ -1476,11 +1851,15 @@ class ThermalVideoModel(QObject):
         # Reset edit range
         self.set_editRange(0)
 
+        if changed and record_history and not self._disable_history:
+            self._record_history_state()
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def edit_point_property(self, *args):
         frame = self.thermalData.frame_position
         point_name = self.main_win.roi_idx_cmbbx.currentText()
         edit_name = self.main_win.roi_name_ledit.text()
+        changed = False
         x = self.main_win.roi_x_spbx.value()
         y = self.main_win.roi_y_spbx.value()
         if x < 0 and y < 0:
@@ -1500,8 +1879,28 @@ class ThermalVideoModel(QObject):
         rad = self.main_win.roi_rad_spbx.value()
         aggfunc = self.main_win.roi_aggfunc_cmbbx.currentText()
         col = self.main_win.roi_color_cmbbx.currentText()
+        show_temp = (
+            self.main_win.roi_showTemp_chbx.checkState()
+            != Qt.CheckState.Unchecked
+        )
+
+        prev_pen_color = self.tracking_mark[point_name].get(
+            "pen_color",
+            col,
+        )
+        prev_show_temp = self.tracking_mark[point_name].get(
+            "show_temp", True
+        )
+
+        if not self._disable_history:
+            self._ensure_history_baseline()
 
         self.tracking_mark[point_name]["pen_color"] = col
+        self.tracking_mark[point_name]["show_temp"] = show_temp
+        if col != prev_pen_color:
+            changed = True
+        if show_temp != prev_show_temp:
+            changed = True
 
         # Name edit
         if edit_name != point_name:
@@ -1510,6 +1909,8 @@ class ThermalVideoModel(QObject):
             )
             self.tracking_mark[edit_name] = self.tracking_mark.pop(point_name)
             point_name = edit_name
+
+            changed = True
 
             # update main_win list
             self.main_win.roi_idx_cmbbx.clear()
@@ -1523,12 +1924,14 @@ class ThermalVideoModel(QObject):
             self.tracking_mark[point_name]["rad"] = rad
             # Reset tracking values
             self.tracking_point[point_name].value_ts[frame] = np.nan
+            changed = True
 
         # aggfunc change
         if aggfunc != self.tracking_point[point_name].aggfunc:
             self.tracking_point[point_name].aggfunc = aggfunc
             # Reset tracking values
             self.tracking_point[point_name].value_ts[:] = np.nan
+            changed = True
 
         # Position change
         current_x, current_y = self.tracking_point[
@@ -1537,6 +1940,7 @@ class ThermalVideoModel(QObject):
         if x != current_x or y != current_y:
             self.tracking_mark[point_name]["x"] = x
             self.tracking_mark[point_name]["y"] = y
+            changed = True
 
             # Reset tracking values from the current frame
             Nframes = len(self.tracking_point[point_name].value_ts)
@@ -1600,16 +2004,29 @@ class ThermalVideoModel(QObject):
         self.update_dispImg()
         self.select_point_ui(point_name)
 
-        self.plot_timecourse()
+        self.plot_timecourse(update_plot=prev_show_temp != show_temp)
         self.set_editRange(0)
+
+        if changed and not self._disable_history:
+            self._ensure_history_baseline()
+            self._record_history_state()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def apply_radius_all(self, *args):
         point_name = self.main_win.roi_idx_cmbbx.currentText()
         rad = self.main_win.roi_rad_spbx.value()
         val_reset_frames = self.tracking_point[point_name].radius != rad
-        self.tracking_point[point_name].radius[:] = rad
-        self.tracking_point[point_name].value_ts[val_reset_frames] = np.nan
+        changed = np.any(val_reset_frames)
+
+        if changed:
+            if not self._disable_history:
+                self._ensure_history_baseline()
+
+            self.tracking_point[point_name].radius[:] = rad
+            self.tracking_point[point_name].value_ts[val_reset_frames] = np.nan
+
+            if not self._disable_history:
+                self._record_history_state()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def erase_point(self):
@@ -1652,6 +2069,12 @@ class ThermalVideoModel(QObject):
             fromFrame = frame + 1  # Not include the current frame
             frame_indices = np.arange(fromFrame, Nframes)
 
+        if len(frame_indices) == 0:
+            return
+
+        if not self._disable_history:
+            self._ensure_history_baseline()
+
         self.tracking_point[point_name].set_position(
             np.nan,
             np.nan,
@@ -1668,12 +2091,18 @@ class ThermalVideoModel(QObject):
 
         self.set_editRange(0)
 
+        if not self._disable_history:
+            self._record_history_state()
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def delete_point(self, point_name=None, ask_confirm=True):
         """Delete tracking point time series"""
 
         if point_name is None:
             point_name = self.main_win.roi_idx_cmbbx.currentText()
+
+        if point_name not in self.tracking_mark:
+            return
 
         if ask_confirm:
             # Confirm delete
@@ -1691,9 +2120,15 @@ class ThermalVideoModel(QObject):
             if rep == QMessageBox.No:
                 return
 
+        if not self._disable_history:
+            self._ensure_history_baseline()
+
         del self.tracking_mark[point_name]
-        self.edit_tracking_point(point_name)
+        self.edit_tracking_point(point_name, record_history=False)
         self.plot_timecourse()
+
+        if not self._disable_history:
+            self._record_history_state()
 
     # --- Time marker control functions ---------------------------------------
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1721,6 +2156,9 @@ class ThermalVideoModel(QObject):
             msgBox.exec()
             return
 
+        if not self._disable_history:
+            self._ensure_history_baseline()
+
         # Put a marker at the current thermal frame
         frmIdx = self.thermalData.frame_position
         self.time_marker[frmIdx] = marker_name
@@ -1736,10 +2174,16 @@ class ThermalVideoModel(QObject):
         # Plot time mark
         self.plot_timecourse()
 
+        if not self._disable_history:
+            self._record_history_state()
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def del_marker(self):
         frmIdx = self.thermalData.frame_position
         if frmIdx in self.time_marker:
+            if not self._disable_history:
+                self._ensure_history_baseline()
+
             del self.time_marker[frmIdx]
 
             # Set maker list
@@ -1751,6 +2195,9 @@ class ThermalVideoModel(QObject):
             self.show_marker()
 
             self.plot_timecourse()
+
+            if not self._disable_history:
+                self._record_history_state()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def jump_marker(self, shift):
@@ -1830,26 +2277,65 @@ class ThermalVideoModel(QObject):
         plot_all_points=False,
         update_all_data=False,
         update_plot=False,
+        skip_value_update=False,
         *args,
         **kwargs,
     ):
-        # self.lpf = self.main_win.roi_LPF_thresh_spbx.value()
+        lpf_thresh = 0.0
+        lpf_enabled = True
+        # Adapt LPF resolution to sampling rate and record length
+        if (
+            hasattr(self.main_win, "roi_LPF_thresh_spbx")
+            and self.thermalData.loaded
+        ):
+            frame_rate = getattr(self.thermalData, "frame_rate", 0) or 0
+            n_frames = getattr(self.thermalData, "duration_frame", 0) or 0
+            if frame_rate > 0 and n_frames > 0:
+                nyq = frame_rate / 2.0
+                df = frame_rate / max(1, n_frames)
+                decimals = int(np.clip(np.ceil(-np.log10(df)) + 1, 1, 6))
+                sp = self.main_win.roi_LPF_thresh_spbx
+                sp.blockSignals(True)
+                sp.setDecimals(decimals)
+                sp.setSingleStep(df)
+                sp.setMinimum(0.0)
+                sp.setMaximum(nyq)
+                if sp.value() > nyq:
+                    sp.setValue(nyq)
+                lpf_thresh = sp.value()
+                sp.blockSignals(False)
+            else:
+                lpf_thresh = self.main_win.roi_LPF_thresh_spbx.value()
+        if hasattr(self.main_win, "roi_LPF_enable_chbx"):
+            lpf_enabled = (
+                self.main_win.roi_LPF_enable_chbx.checkState()
+                != Qt.CheckState.Unchecked
+            )
+        if not lpf_enabled:
+            lpf_thresh = 0.0
+        self.lpf_hz = lpf_thresh
 
         # --- Set xvals in time -----------------------------------------------
         if self.main_win.plot_xvals is None:
             xvals = np.arange(0, self.thermalData.duration_frame)
             if len(xvals) == 0:
-                self.main_win.plot_ax.cla()
+                for ax in self.main_win.plot_axes:
+                    ax.cla()
                 self.main_win.plot_xvals = None
                 return
 
-            xunit = 1.0 / self.videoData.frame_rate
+            if self.videoData.loaded and self.videoData.frame_rate:
+                frame_rate = self.videoData.frame_rate
+            else:
+                frame_rate = self.thermalData.frame_rate
+            xunit = 1.0 / frame_rate
             self.main_win.plot_xvals = xvals * xunit
             xvals = self.main_win.plot_xvals
-            self.main_win.plot_ax.set_xlim(xvals[0] - xunit, xvals[-1] + xunit)
+            for ax in self.main_win.plot_axes:
+                ax.set_xlim(xvals[0] - xunit, xvals[-1] + xunit)
 
-            # Set xtick label
-            xticks = self.main_win.plot_ax.get_xticks()
+            # Set xtick label using bottom axis
+            xticks = self.main_win.plot_ax_y.get_xticks()
             xtick_labs = []
             for xt in xticks:
                 if xt < 0:
@@ -1861,24 +2347,43 @@ class ThermalVideoModel(QObject):
                     tstr = re.sub(r"\..+$", "", tstr)
                     xtick_labs.append(tstr)
 
-            self.main_win.plot_ax.set_xticks(xticks, xtick_labs)
-            self.main_win.plot_ax.set_xlim(xvals[0] - xunit, xvals[-1] + xunit)
+            self.main_win.plot_ax_y.set_xticks(xticks, xtick_labs)
+            for ax in self.main_win.plot_axes:
+                ax.set_xlim(xvals[0] - xunit, xvals[-1] + xunit)
+            self.main_win.plot_ax_temp.set_ylabel("Temp (°C)")
+            self.main_win.plot_ax_x.set_ylabel("X (px)")
+            self.main_win.plot_ax_y.set_ylabel("Y (px)")
+
+        if (
+            self.main_win.plot_xvals is None
+            or self.thermalData.frame_position >= len(self.main_win.plot_xvals)
+        ):
+            return
 
         # --- Time line -------------------------------------------------------
         xpos = self.main_win.plot_xvals[self.thermalData.frame_position]
         if self.main_win.plot_timeline is None:
-            self.main_win.plot_timeline = self.main_win.plot_ax.axvline(
-                xpos, color="k", ls=":", lw=1
-            )
+            self.main_win.plot_timeline = [
+                ax.axvline(xpos, color="k", ls=":", lw=1)
+                for ax in self.main_win.plot_axes
+            ]
         else:
-            self.main_win.plot_timeline.set_xdata([xpos, xpos])
+            for tl in self.main_win.plot_timeline:
+                tl.set_xdata([xpos, xpos])
 
         # --- Marker line -----------------------------------------------------
         for frame in self.time_marker.keys():
+            if frame >= len(self.main_win.plot_xvals):
+                continue
             tx = self.main_win.plot_xvals[frame]
-            self.main_win.plot_marker_line[frame] = (
-                self.main_win.plot_ax.axvline(tx, color="r", lw=1)
-            )
+            if frame in self.main_win.plot_marker_line:
+                for line in self.main_win.plot_marker_line[frame]:
+                    line.set_xdata([tx, tx])
+            else:
+                self.main_win.plot_marker_line[frame] = [
+                    ax.axvline(tx, color="r", lw=1)
+                    for ax in self.main_win.plot_axes
+                ]
 
         # Delete marker
         if hasattr(self.main_win, "plot_marker_line"):
@@ -1888,7 +2393,8 @@ class ThermalVideoModel(QObject):
             )
             if len(rm_marker):
                 for rmfrm in rm_marker:
-                    self.main_win.plot_marker_line[rmfrm].remove()
+                    for line in self.main_win.plot_marker_line[rmfrm]:
+                        line.remove()
                     del self.main_win.plot_marker_line[rmfrm]
 
         # --- Check value update ----------------------------------------------
@@ -1908,12 +2414,12 @@ class ThermalVideoModel(QObject):
         # Check point list update
         update_point_list = False | update_plot
         rm_lines = []
-        for line in self.main_win.plot_line.keys():
+        existing_lines = set(self.main_win.plot_line.keys())
+        existing_lines |= set(self.main_win.plot_line_x.keys())
+        existing_lines |= set(self.main_win.plot_line_y.keys())
+        for line in list(existing_lines):
             if line not in all_points:
                 rm_lines.append(line)
-                # if hasattr(self.main_win, 'plot_line_lpf') and \
-                #         line in self.main_win.plot_line_lpf:
-                #     rm_lines.append(self.main_win.plot_line_lpf[line])
 
         if len(rm_lines):
             update_point_list = True
@@ -1923,19 +2429,38 @@ class ThermalVideoModel(QObject):
                     and line in self.main_win.plot_line
                 ):
                     del self.main_win.plot_line[line]
-
-                # if hasattr(self.main_win, 'plot_line_lpf') and \
-                #         line in self.main_win.plot_line_lpf:
-                #     self.main_win.plot_line_lpf[line].remove()
-                #     del self.main_win.plot_line_lpf[line]
+                if (
+                    hasattr(self.main_win, "plot_line_lpf")
+                    and line in self.main_win.plot_line_lpf
+                ):
+                    self.main_win.plot_line_lpf[line].remove()
+                    del self.main_win.plot_line_lpf[line]
+                if (
+                    hasattr(self.main_win, "plot_line_x")
+                    and line in self.main_win.plot_line_x
+                ):
+                    self.main_win.plot_line_x[line].remove()
+                    del self.main_win.plot_line_x[line]
+                if (
+                    hasattr(self.main_win, "plot_line_y")
+                    and line in self.main_win.plot_line_y
+                ):
+                    self.main_win.plot_line_y[line].remove()
+                    del self.main_win.plot_line_y[line]
 
         # Check color change
         update_color = False
         for point in Points:
-            if point not in self.main_win.plot_line:
+            line_ref = None
+            if point in self.main_win.plot_line:
+                line_ref = self.main_win.plot_line[point]
+            elif point in self.main_win.plot_line_x:
+                line_ref = self.main_win.plot_line_x[point]
+
+            if line_ref is None:
                 continue
 
-            cur_col = self.main_win.plot_line[point].get_color()
+            cur_col = line_ref.get_color()
             col = pen_color_rgb[self.tracking_mark[point]["pen_color"]]
             if col == "#ffffff":  # white
                 col = "#000000"
@@ -1945,20 +2470,20 @@ class ThermalVideoModel(QObject):
                 break
 
         # -- Update value --
-        if update_all_data:
+        if update_all_data and not skip_value_update:
             # Update tracking_point values
             for point in Points:
                 self.tracking_point[point].update_all_values()
         elif (
             self.main_win.roi_online_plot_chbx.checkState()
             != Qt.CheckState.Unchecked
-        ):
+        ) and not skip_value_update:
             # Update current data
             for point_name in Points:
                 self.tracking_point[point].get_value(
                     [self.thermalData.frame_position], force_update=True
                 )
-        elif not update_color:
+        elif not (update_color or update_plot):
             self.main_win.roi_plot_canvas.draw()
             return
 
@@ -1971,81 +2496,140 @@ class ThermalVideoModel(QObject):
             else:
                 ls = "-"
 
-            # si = 1.0 / self.tracking_point[point].frequency
-            if point not in self.main_win.plot_line:  # or \
-                # point not in self.main_win.plot_line_lpf:
+            show_temp = self.tracking_mark[point].get("show_temp", True)
+            self.tracking_mark[point]["show_temp"] = show_temp
+            temp_ts = np.asarray(
+                self.tracking_point[point].value_ts, dtype=float
+            )
+            lpf_ts = None
+            if lpf_thresh > 0.0 and show_temp:
+                xi0 = np.argwhere(np.logical_not(np.isnan(temp_ts))).ravel()
+                lpf_ts = np.ones(len(temp_ts)) * np.nan
+                if len(xi0) > 1:
+                    y0 = temp_ts[xi0]
+                    si = 1.0 / self.tracking_point[point].frequency
+                    lpf_ts[np.min(xi0): np.max(xi0) + 1] = self.InterpLPF(
+                        y0, xi0, si, lpf_thresh
+                    )
+                    # Respect missing data: keep NaN where original was NaN
+                    lpf_ts[np.isnan(temp_ts)] = np.nan
 
+            # Temperature line handling (visible toggle)
+            if show_temp:
+                if point not in self.main_win.plot_line:
+                    update_point_list = True
+                    self.main_win.plot_line[point] = (
+                        self.main_win.plot_ax_temp.plot(
+                            self.main_win.plot_xvals,
+                            temp_ts,
+                            ls,
+                            lw=1,
+                            color=col,
+                            label=point,
+                        )[0]
+                    )
+                self.main_win.plot_line[point].set_color(col)
+                self.main_win.plot_line[point].set_ls(ls)
+                self.main_win.plot_line[point].set_ydata(temp_ts.copy())
+
+                if lpf_thresh > 0.0 and lpf_ts is not None:
+                    if point in self.main_win.plot_line_lpf:
+                        self.main_win.plot_line_lpf[point].set_ydata(lpf_ts)
+                        self.main_win.plot_line_lpf[point].set_color(col)
+                        self.main_win.plot_line_lpf[point].set_alpha(0.35)
+                        self.main_win.plot_line_lpf[point].set_linewidth(3.0)
+                        self.main_win.plot_line_lpf[point].set_linestyle("-")
+                    else:
+                        self.main_win.plot_line_lpf[point] = (
+                            self.main_win.plot_ax_temp.plot(
+                                self.main_win.plot_xvals,
+                                lpf_ts,
+                                "-",
+                                lw=3.0,
+                                color=col,
+                                alpha=0.35,
+                            )[0]
+                        )
+                elif point in self.main_win.plot_line_lpf:
+                    self.main_win.plot_line_lpf[point].remove()
+                    del self.main_win.plot_line_lpf[point]
+            else:
                 if point in self.main_win.plot_line:
                     self.main_win.plot_line[point].remove()
                     del self.main_win.plot_line[point]
+                    update_point_list = True
+                if point in self.main_win.plot_line_lpf:
+                    self.main_win.plot_line_lpf[point].remove()
+                    del self.main_win.plot_line_lpf[point]
 
-                # if point in self.main_win.plot_line_lpf:
-                #     del self.main_win.plot_line_lpf[point]
+            # X/Y tracks (always shown)
+            if point not in self.main_win.plot_line_x:
+                self.main_win.plot_line_x[point] = (
+                    self.main_win.plot_ax_x.plot(
+                        self.main_win.plot_xvals,
+                        self.tracking_point[point].x,
+                        ls,
+                        lw=1,
+                        color=col,
+                        label=f"{point} x",
+                    )[0]
+                )
+            if point not in self.main_win.plot_line_y:
+                self.main_win.plot_line_y[point] = (
+                    self.main_win.plot_ax_y.plot(
+                        self.main_win.plot_xvals,
+                        self.tracking_point[point].y,
+                        ls,
+                        lw=1,
+                        color=col,
+                        label=f"{point} y",
+                    )[0]
+                )
 
-                # Create lines
-                self.main_win.plot_line[point] = self.main_win.plot_ax.plot(
-                    self.main_win.plot_xvals,
-                    self.tracking_point[point].value_ts,
-                    ls,
-                    lw=1,
-                    color=col,
-                    label=point,
-                )[0]
+            self.main_win.plot_line_x[point].set_color(col)
+            self.main_win.plot_line_x[point].set_ls(ls)
+            self.main_win.plot_line_x[point].set_ydata(
+                self.tracking_point[point].x.copy()
+            )
 
-                # xi0 = np.argwhere(
-                #     np.logical_not(
-                #         np.isnan(self.tracking_point[point].value_ts))).ravel()
-                # if self.lpf > 0.0 and len(xi0) > 1:
-                #     y0 = self.tracking_point[point].value_ts[xi0]
-                #     lpf_ts = np.ones(
-                #         len(self.tracking_point[point].value_ts)) * np.nan
-                #     lpf_ts[np.min(xi0):np.max(xi0)+1] = \
-                #         self.InterpLPF(y0, xi0, si, self.lpf)
-                # else:
-                #     lpf_ts = self.tracking_point[point].value_ts
+            self.main_win.plot_line_y[point].set_color(col)
+            self.main_win.plot_line_y[point].set_ls(ls)
+            self.main_win.plot_line_y[point].set_ydata(
+                self.tracking_point[point].y.copy()
+            )
 
-                # self.main_win.plot_line_lpf[point] = \
-                #     self.main_win.plot_ax.plot(
-                #         self.main_win.plot_xvals,
-                #         lpf_ts, ':', lw=2, color='k')[0]
+        # Remove all LPF lines if LPF disabled globally
+        if not lpf_enabled and len(self.main_win.plot_line_lpf):
+            for line in list(self.main_win.plot_line_lpf.values()):
+                line.remove()
+            self.main_win.plot_line_lpf.clear()
 
-                # update_point_list = True
-            else:
-                if update_color:
-                    self.main_win.plot_line[point].set_color(col)
-                    self.main_win.plot_line[point].set_ls(ls)
-                    # if point in self.main_win.plot_line_lpf:
-                    #     self.main_win.plot_line_lpf[point].set_color(col)
-                else:
-                    self.main_win.plot_line[point].set_ydata(
-                        self.tracking_point[point].value_ts.copy()
-                    )
-
-                    # xi0 = np.argwhere(
-                    #     np.logical_not(
-                    #         np.isnan(self.tracking_point[point].value_ts))
-                    #     ).ravel()
-                    # if len(xi0) > 100:
-                    #     y0 = self.tracking_point[point].value_ts[xi0]
-                    #     lpf_ts = np.ones(
-                    #         len(self.tracking_point[point].value_ts)
-                    #         ) * np.nan
-                    #     lpf_ts[np.min(xi0):np.max(xi0)+1] = \
-                    #         self.InterpLPF(y0, xi0, si, self.lpf)
-                    #     if point in self.main_win.plot_line_lpf:
-                    #         self.main_win.plot_line_lpf[point
-                    #                                     ].set_ydata(lpf_ts)
-
-        self.main_win.plot_ax.relim()
-        self.main_win.plot_ax.autoscale_view()
+        for ax in self.main_win.plot_axes:
+            ax.relim()
+            ax.autoscale_view()
 
         # -- legend --
         if update_color or update_point_list:
-            if self.main_win.plot_ax.get_legend() is not None:
-                self.main_win.plot_ax.get_legend().remove()
+            for ax in (
+                self.main_win.plot_ax_temp,
+                self.main_win.plot_ax_x,
+                self.main_win.plot_ax_y,
+            ):
+                if ax.get_legend() is not None:
+                    ax.get_legend().remove()
 
         if len(self.main_win.plot_line):
-            self.main_win.plot_ax.legend(
+            self.main_win.plot_ax_temp.legend(
+                bbox_to_anchor=(1, 1), loc="upper left"
+            )
+
+        if len(self.main_win.plot_line_x):
+            self.main_win.plot_ax_x.legend(
+                bbox_to_anchor=(1, 1), loc="upper left"
+            )
+
+        if len(self.main_win.plot_line_y):
+            self.main_win.plot_ax_y.legend(
                 bbox_to_anchor=(1, 1), loc="upper left"
             )
 
@@ -2060,36 +2644,55 @@ class ThermalVideoModel(QObject):
             self._plot_count = 1
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def move_timeline_marker(self, frame_idx):
+        if self.main_win.plot_xvals is None:
+            return
+        if frame_idx is None or frame_idx >= len(self.main_win.plot_xvals):
+            return
+
+        xpos = self.main_win.plot_xvals[frame_idx]
+        if self.main_win.plot_timeline is None:
+            self.main_win.plot_timeline = [
+                ax.axvline(xpos, color="k", ls=":", lw=1)
+                for ax in self.main_win.plot_axes
+            ]
+        else:
+            for tl in self.main_win.plot_timeline:
+                tl.set_xdata([xpos, xpos])
+
+        self.main_win.roi_plot_canvas.draw_idle()
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def InterpLPF(self, y0, xi0, si=1, lpf=None):
         """
-        Interpolates a signal in a regular grid with linear interpolation.
-        Then, FFT low-pass filter is applied to the interpolated signal.
-
-        Parameters
-        ----------
-        y0 : array
-            Sample values.
-        xi0 : int array
-            Indices of samples in y0.
-        si : float
-            Sampling interval (s).
-        lpf : float
-            Low-pass filtering frequency threshold.
-
-        Returns
-        -------
-        yo :
-            Filtered interpolated array in [min(x0), max(x1)] range.
-
-
+        Interpolate to regular grid and apply low-pass with mirror padding to
+        reduce edge effects. Returns filtered values only on the original
+        sample span; outside the valid span caller keeps NaN.
         """
+
+        if lpf is None or lpf <= 0:
+            return y0
 
         xi = np.arange(np.min(xi0), np.max(xi0) + 1)
         y = interpolate.interp1d(xi0, y0, kind="linear")(xi)
-        fy = fft(y)
-        freq = fftfreq(len(y), d=si)
+
+        # Mirror padding to mitigate circular convolution artifacts
+        n = len(y)
+        if n < 3:
+            return y
+
+        pad = min(max(1, n // 4), n - 1)
+        pre = y[1: pad + 1][::-1]
+        post = y[-2: -pad - 2: -1]
+        y_ext = np.concatenate([pre, y, post])
+
+        fy = fft(y_ext)
+        freq = fftfreq(len(y_ext), d=si)
         fy[np.abs(freq) > lpf] = 0
-        yo = ifft(fy).real
+        yo_ext = ifft(fy).real
+
+        # Extract center (original span)
+        yo = yo_ext[pad: pad + n]
 
         return yo
 
@@ -2115,6 +2718,73 @@ class ThermalVideoModel(QObject):
         self.main_win.positionSlider.blockSignals(False)
 
         # update plot timeline
+        self.plot_timecourse()
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def jump_lpf_outlier(self):
+        """Jump to frame with largest |temp-LPF| for current point."""
+
+        if not self.thermalData.loaded or len(self.tracking_point) == 0:
+            return
+
+        point_name = self.main_win.roi_idx_cmbbx.currentText()
+        if point_name == "" or point_name not in self.tracking_point:
+            return
+
+        # Require temp plot to be visible, otherwise LPF outlier is undefined
+        show_temp = self.tracking_mark.get(point_name, {}).get(
+            "show_temp", True
+        )
+        if not show_temp:
+            self.main_win.msg_dlg(
+                "This point has 'Show temp plot' disabled.\n"
+                "Enable it to jump to the LPF outlier.",
+                title="Jump outlier",
+            )
+            return
+
+        # Ensure we have up-to-date temperature series
+        # self.tracking_point[point_name].update_all_values()
+
+        lpf_hz = self.main_win.roi_LPF_thresh_spbx.value()
+        if lpf_hz <= 0:
+            return
+
+        temp_ts = np.asarray(self.tracking_point[point_name].value_ts, float)
+        if np.all(np.isnan(temp_ts)):
+            return
+
+        xi0 = np.argwhere(~np.isnan(temp_ts)).ravel()
+        if len(xi0) < 2:
+            return
+
+        freq = getattr(self.tracking_point[point_name], "frequency", 0) or 0
+        if freq <= 0:
+            return
+
+        lpf_ts = np.ones_like(temp_ts) * np.nan
+        si = 1.0 / freq
+        y0 = temp_ts[xi0]
+        lpf_ts[np.min(xi0): np.max(xi0) + 1] = self.InterpLPF(
+            y0, xi0, si, lpf_hz
+        )
+        lpf_ts[np.isnan(temp_ts)] = np.nan
+
+        valid_mask = ~np.isnan(temp_ts) & ~np.isnan(lpf_ts)
+        if not np.any(valid_mask):
+            return
+
+        diff = np.abs(temp_ts[valid_mask] - lpf_ts[valid_mask])
+        if diff.size == 0:
+            return
+
+        target_idx = int(np.where(valid_mask)[0][np.argmax(diff)])
+        self.thermalData.show_frame(target_idx)
+
+        self.main_win.positionSlider.blockSignals(True)
+        self.main_win.positionSlider.setValue(int(self.common_time_ms))
+        self.main_win.positionSlider.blockSignals(False)
+
         self.plot_timecourse()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -2146,8 +2816,8 @@ class ThermalVideoModel(QObject):
             # Ask if reload the data
             ret = QMessageBox.question(
                 self.main_win,
-                "Reload the tempertature values",
-                "Reload the tempertature values?",
+                "Reload the temperature values",
+                "Reload the temperature values?",
                 QMessageBox.Yes | QMessageBox.No,
                 defaultButton=QMessageBox.No,
             )
@@ -2162,9 +2832,12 @@ class ThermalVideoModel(QObject):
                 self.tracking_point[point].update_all_values()
 
         # Initialize saving data frame
+        lpf_cutoff = self.main_win.roi_LPF_thresh_spbx.value()
         cols = pd.MultiIndex.from_product([[""], ["time_ms", "marker"]])
         cols = cols.append(
-            pd.MultiIndex.from_product([Points, ["x", "y", "radius", "temp"]])
+            pd.MultiIndex.from_product(
+                [Points, ["x", "y", "radius", "temp", "temp_lpf"]]
+            )
         )
         saveData = pd.DataFrame(columns=cols)
         saveData.index.name = "frame"
@@ -2189,13 +2862,16 @@ class ThermalVideoModel(QObject):
             temp = self.tracking_point[point].value_ts
             saveData.loc[:, (point, "temp")] = temp
 
-            # si = 1.0 / self.tracking_point[point].frequency
-            # xi0 = np.argwhere(np.logical_not(np.isnan(temp))).ravel()
-            # y0 = temp[xi0]
-            # lpf_ts = np.ones(len(temp)) * np.nan
-            # lpf_ts[np.min(xi0):np.max(xi0)+1] = \
-            #     self.InterpLPF(y0, xi0, si, self.lpf)
-            # saveData.loc[:, (point, 'temp_lpf')] = lpf_ts
+            if lpf_cutoff > 0.0:
+                xi0 = np.argwhere(np.logical_not(np.isnan(temp))).ravel()
+                lpf_ts = np.ones(len(temp)) * np.nan
+                if len(xi0) > 1:
+                    y0 = temp[xi0]
+                    si = 1.0 / self.tracking_point[point].frequency
+                    lpf_ts[np.min(xi0):np.max(xi0) + 1] = self.InterpLPF(
+                        y0, xi0, si, lpf_cutoff
+                    )
+                saveData.loc[:, (point, "temp_lpf")] = lpf_ts
 
         # Save as csv
         saveData.to_csv(fname, quoting=csv.QUOTE_NONNUMERIC)
@@ -2206,12 +2882,14 @@ class ThermalVideoModel(QObject):
             point_property[point] = {
                 "aggfunc": self.tracking_point[point].aggfunc,
                 "color": self.tracking_mark[point]["pen_color"],
+                "show_temp": self.tracking_mark[point].get("show_temp", True),
             }
 
         with open(fname, "r") as fd:
             C = fd.read()
 
-        C = f"# TVT export,{str(point_property)}\n" + C
+        meta = {"lpf_hz": lpf_cutoff, "points": point_property}
+        C = f"# TVT export,{str(meta)}\n" + C
         with open(fname, "w") as fd:
             fd.write(C)
 
@@ -2451,6 +3129,8 @@ class ThermalVideoModel(QObject):
         with open(fileName, "r") as fd:
             head = fd.readline()
 
+        meta = {}
+        point_property = {}
         if "TVT export" in head:
             cols = [
                 col
@@ -2458,14 +3138,29 @@ class ThermalVideoModel(QObject):
                 if len(col[0]) and "Unnamed" not in col[0]
             ]
             cols = pd.MultiIndex.from_tuples(cols)
-            point_property = eval(
-                ",".join(
-                    [p for p in head.rstrip().split(",")[1:] if len(p) > 0]
-                )
+
+            meta_str = ",".join(
+                [p for p in head.rstrip().split(",")[1:] if len(p) > 0]
             )
+            try:
+                meta = ast.literal_eval(meta_str)
+                if isinstance(meta, dict):
+                    point_property = meta.get("points", meta) or {}
+                    lpf_from_file = meta.get("lpf_hz")
+                    if lpf_from_file is not None:
+                        sp = self.main_win.roi_LPF_thresh_spbx
+                        cb = self.main_win.roi_LPF_enable_chbx
+                        sp.blockSignals(True)
+                        sp.setValue(float(lpf_from_file))
+                        sp.blockSignals(False)
+                        cb.blockSignals(True)
+                        cb.setChecked(lpf_from_file > 0)
+                        cb.blockSignals(False)
+            except Exception:
+                meta = {}
+                point_property = {}
         else:
             cols = track_df.columns
-            point_property = {}
 
         if len(track_df.index) == self.thermalData.duration_frame:
             data_time = "thermo"
@@ -2547,7 +3242,7 @@ class ThermalVideoModel(QObject):
             if "likelihood" in track_df[point].columns:
                 res_track_df.loc[:, (point, "likelihood")] = lh
             if "temp" in track_df[point].columns:
-                res_track_df.loc[:, (point, "temp")] = temp
+                res_track_df.loc[:, (point, "temp")] = temp.astype(float)
             if "radius" in track_df[point].columns:
                 res_track_df.loc[:, (point, "radius")] = radius
 
@@ -2579,6 +3274,12 @@ class ThermalVideoModel(QObject):
 
             # Create a point mark display
             self.tracking_mark[point] = {"x": xp, "y": yp}
+            show_temp = True
+            if point in point_property and "show_temp" in point_property[
+                point
+            ]:
+                show_temp = point_property[point]["show_temp"]
+            self.tracking_mark[point]["show_temp"] = show_temp
             self.main_win.thermalDispImg.tracking_mark = self.tracking_mark
             self.main_win.videoDispImg.tracking_mark = self.tracking_mark
 
@@ -2594,14 +3295,36 @@ class ThermalVideoModel(QObject):
             )
 
             if "temp" in res_track_df[point].columns:
-                self.tracking_point[point].value_ts = res_track_df[point][
-                    "temp"
-                ].values
+                self.tracking_point[point].value_ts = (
+                    res_track_df[point]["temp"].values.astype(float)
+                )
 
             if "radius" in res_track_df[point].columns:
-                self.tracking_point[point].radisu = res_track_df[point][
-                    "radius"
-                ].values
+                rad_vals = res_track_df[point]["radius"].values.astype(
+                    float
+                )
+                self.tracking_point[point].radius[:] = (
+                    tracking_point_radius_default
+                )
+                rad_mask = np.logical_not(np.isnan(rad_vals))
+                if rad_mask.any():
+                    self.tracking_point[point].radius[rad_mask] = (
+                        rad_vals[rad_mask].astype(int)
+                    )
+            else:
+                self.tracking_point[point].radius[:] = (
+                    tracking_point_radius_default
+                )
+
+            self.tracking_mark[point]["rad"] = self.tracking_point[
+                point
+            ].radius[currentFrm]
+
+            # Compute temperature only for the current frame to avoid
+            # expensive full-series recomputation on load
+            self.tracking_point[point].get_value(
+                [currentFrm], force_update=True
+            )
 
             if point in point_property:
                 if (
@@ -2625,6 +3348,10 @@ class ThermalVideoModel(QObject):
                     self.tracking_mark[point]["pen_color"] = point_property[
                         point
                     ]["color"]
+                if "show_temp" in point_property[point]:
+                    self.tracking_mark[point]["show_temp"] = point_property[
+                        point
+                    ]["show_temp"]
                 self.edit_point_signal.emit(point)
 
         # --- Read marker -----------------------------------------------------
@@ -2638,7 +3365,12 @@ class ThermalVideoModel(QObject):
                 self.show_marker()
 
         # Update thermal data time-series plot
-        self.plot_timecourse()
+        self.plot_timecourse(
+            plot_all_points=True,
+            update_all_data=False,
+            update_plot=True,
+            skip_value_update=True,
+        )
 
     # --- Save/Load working status --------------------------------------------
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -2734,6 +3466,12 @@ class ThermalVideoModel(QObject):
             settings["thermal_clim_max"] = (
                 self.main_win.thermal_clim_max_spbx.value()
             )
+
+        # LPF settings
+        settings["lpf_enabled"] = (
+            self.main_win.roi_LPF_enable_chbx.checkState()
+        )
+        settings["lpf_thresh"] = self.main_win.roi_LPF_thresh_spbx.value()
 
         # --- Convert Path to relative to DATA_ROOT ---
         def path_to_rel(param):
@@ -2851,6 +3589,21 @@ class ThermalVideoModel(QObject):
             if "thermal_clim_max" in settings:
                 del settings["thermal_clim_max"]
 
+        # LPF settings
+        if "lpf_enabled" in settings:
+            self.main_win.roi_LPF_enable_chbx.blockSignals(True)
+            self.main_win.roi_LPF_enable_chbx.setCheckState(
+                settings["lpf_enabled"]
+            )
+            self.main_win.roi_LPF_enable_chbx.blockSignals(False)
+            del settings["lpf_enabled"]
+
+        if "lpf_thresh" in settings:
+            self.main_win.roi_LPF_thresh_spbx.blockSignals(True)
+            self.main_win.roi_LPF_thresh_spbx.setValue(settings["lpf_thresh"])
+            self.main_win.roi_LPF_thresh_spbx.blockSignals(False)
+            del settings["lpf_thresh"]
+
         # Load videoData
         if "videoData" in settings:
             fname = self.DATA_ROOT / settings["videoData"]["filename"]
@@ -2925,6 +3678,8 @@ class ThermalVideoModel(QObject):
             if len(self.tracking_point):
                 for point_name, tm in settings["tracking_mark"].items():
                     if point_name in self.tracking_point:
+                        if "show_temp" not in tm:
+                            tm["show_temp"] = True
                         self.tracking_mark[point_name] = tm
 
                     self.main_win.thermalDispImg.tracking_mark = (
@@ -2959,6 +3714,15 @@ class ThermalVideoModel(QObject):
         for param, obj in settings.items():
             if hasattr(self, param):
                 setattr(self, param, obj)
+
+        # Redraw plots for all restored points on startup without recomputing
+        if self.thermalData.loaded and len(self.tracking_point):
+            self.plot_timecourse(
+                plot_all_points=True,
+                update_all_data=False,
+                update_plot=True,
+                skip_value_update=True,
+            )
 
         gc.collect()
 
@@ -3008,7 +3772,7 @@ class ThermalVideoModel(QObject):
         pass
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def remove_temprature_outlier(self):
+    def remove_temperature_outlier(self):
         pass
 
 
@@ -3065,6 +3829,12 @@ class MainWindow(QMainWindow):
         self.exportThermalDataVideoBtn.setEnabled(False)
         self.exportThermalDataVideoBtn.setStyleSheet(
             "background:#F7F0A8; color:black;"
+        )
+
+        self.exportTrackingVideoBtn = QPushButton("Export tracking video")
+        self.exportTrackingVideoBtn.setEnabled(False)
+        self.exportTrackingVideoBtn.setStyleSheet(
+            "background:#C6F7C3; color:black;"
         )
 
         # Thermal display image
@@ -3262,6 +4032,8 @@ class MainWindow(QMainWindow):
         self.roi_name_ledit = QLineEdit()
         self.roi_showName_chbx = QCheckBox("Show name")
         self.roi_showName_chbx.setChecked(True)
+        self.roi_showTemp_chbx = QCheckBox("Show temp plot")
+        self.roi_showTemp_chbx.setChecked(True)
 
         self.roi_x_spbx = QSpinBox()
         self.roi_x_spbx.setMinimum(-1)
@@ -3303,15 +4075,18 @@ class MainWindow(QMainWindow):
 
         self.roi_online_plot_chbx = QCheckBox("Online plot")
         self.roi_online_plot_chbx.setChecked(True)
-        self.roi_plot_btn = QPushButton("Plot all")
-        self.roi_plot_btn.setStyleSheet("background:#7fbfff; color:black;")
-
-        # self.roi_LPF_lb = QLabel('Low-pass filter (Hz)')
-        # self.roi_LPF_thresh_spbx = QDoubleSpinBox()
-        # self.roi_LPF_thresh_spbx.setDecimals(5)
-        # self.roi_LPF_thresh_spbx.setSingleStep(0.001)
-        # self.roi_LPF_thresh_spbx.setValue(0.0)
-        # self.roi_LPF_thresh_spbx.setMinimum(0.0)
+        self.roi_plot_btn = QPushButton("Reload all temp")
+        self.roi_plot_btn.setStyleSheet("background:#ffa500; color:black;")
+        self.roi_LPF_lb = QLabel("Low-pass filter (Hz)")
+        self.roi_LPF_enable_chbx = QCheckBox("Show LPF")
+        self.roi_LPF_enable_chbx.setChecked(True)
+        self.roi_LPF_thresh_spbx = QDoubleSpinBox()
+        self.roi_LPF_thresh_spbx.setDecimals(4)
+        self.roi_LPF_thresh_spbx.setSingleStep(0.01)
+        self.roi_LPF_thresh_spbx.setValue(0.0)
+        self.roi_LPF_thresh_spbx.setMinimum(0.0)
+        self.roi_LPF_thresh_spbx.setMaximum(1000.0)
+        self.roi_jump_outlier_btn = QPushButton("Jump outlier")
 
         self.roi_delete_btn = QPushButton("Delete this point")
         self.roi_delete_btn.setFixedHeight(18)
@@ -3329,14 +4104,19 @@ class MainWindow(QMainWindow):
         self.roi_plot_canvas.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Expanding
         )
-        self.plot_ax = self.roi_plot_canvas.figure.subplots(1, 1)
+        self.plot_axes = self.roi_plot_canvas.figure.subplots(
+            3, 1, sharex=True
+        )
+        self.plot_ax_temp, self.plot_ax_x, self.plot_ax_y = self.plot_axes
         self.roi_plot_canvas.figure.subplots_adjust(
-            left=0.08, bottom=0.24, right=0.938, top=0.94
+            left=0.08, bottom=0.1, right=0.94, top=0.96, hspace=0.12
         )
         self.roi_plot_canvas.start_event_loop(0.005)
         self.plot_xvals = None
         self.plot_line = {}
-        # self.plot_line_lpf = {}
+        self.plot_line_lpf = {}
+        self.plot_line_x = {}
+        self.plot_line_y = {}
         self.plot_timeline = None
         self.plot_marker_line = {}
         self.roi_plot_canvas.setEnabled(False)
@@ -3362,6 +4142,9 @@ class MainWindow(QMainWindow):
         self.unloadThermalDataBtn.clicked.connect(self.model.unloadThermalData)
         self.exportThermalDataVideoBtn.clicked.connect(
             self.model.exportThermalDataVideo
+        )
+        self.exportTrackingVideoBtn.clicked.connect(
+            self.model.export_tracking_video
         )
 
         # Video load/unload
@@ -3432,10 +4215,20 @@ class MainWindow(QMainWindow):
         self.roi_jump_max_btn.clicked.connect(
             partial(self.model.jump_extrema_point, minmax="max")
         )
+        self.roi_showTemp_chbx.stateChanged.connect(
+            self.model.edit_point_property
+        )
 
-        # self.roi_LPF_thresh_spbx.valueChanged.connect(
-        #     partial(self.model.plot_timecourse,
-        #             update_plot=True))
+        self.roi_jump_outlier_btn.clicked.connect(
+            self.model.jump_lpf_outlier
+        )
+
+        self.roi_LPF_enable_chbx.stateChanged.connect(
+            partial(self.model.plot_timecourse, update_plot=True)
+        )
+        self.roi_LPF_thresh_spbx.valueChanged.connect(
+            partial(self.model.plot_timecourse, update_plot=True)
+        )
 
         self.roi_load_btn.clicked.connect(
             partial(self.model.load_tracking, fileName=None)
@@ -3456,14 +4249,30 @@ class MainWindow(QMainWindow):
         self.tmark_grpbx.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Fixed
         )
-        self.tmark_grpbx.setFixedHeight(200)
-        tmarkLayout = QGridLayout(self.tmark_grpbx)
-        tmarkLayout.addWidget(QLabel("Name:"), 0, 0)
-        tmarkLayout.addWidget(self.tmark_name_cmbbx, 0, 1)
-        tmarkLayout.addWidget(self.tmark_add_btn, 1, 0, 1, 2)
-        tmarkLayout.addWidget(self.tmark_del_btn, 2, 0, 1, 2)
-        tmarkLayout.addWidget(self.tmark_jumpNext_btn, 3, 0, 1, 2)
-        tmarkLayout.addWidget(self.tmark_jumpPrev_btn, 4, 0, 1, 2)
+        self.tmark_grpbx.setFixedHeight(150)
+        tmarkLayout = QVBoxLayout(self.tmark_grpbx)
+        tmarkLayout.setContentsMargins(6, 4, 6, 4)
+        tmarkLayout.setSpacing(4)
+        tmarkRow1 = QHBoxLayout()
+        tmarkRow1.setContentsMargins(0, 0, 0, 0)
+        tmarkRow1.setSpacing(4)
+        tmarkRow1.addWidget(QLabel("Name:"))
+        tmarkRow1.addWidget(self.tmark_name_cmbbx)
+        tmarkLayout.addLayout(tmarkRow1)
+
+        tmarkRow2 = QHBoxLayout()
+        tmarkRow2.setContentsMargins(0, 0, 0, 0)
+        tmarkRow2.setSpacing(4)
+        tmarkRow2.addWidget(self.tmark_add_btn)
+        tmarkRow2.addWidget(self.tmark_del_btn)
+        tmarkLayout.addLayout(tmarkRow2)
+
+        tmarkRow3 = QHBoxLayout()
+        tmarkRow3.setContentsMargins(0, 0, 0, 0)
+        tmarkRow3.setSpacing(4)
+        tmarkRow3.addWidget(self.tmark_jumpPrev_btn)
+        tmarkRow3.addWidget(self.tmark_jumpNext_btn)
+        tmarkLayout.addLayout(tmarkRow3)
 
         # --- Thermal color map layout ---
         self.cmap_grpbx.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
@@ -3484,34 +4293,76 @@ class MainWindow(QMainWindow):
         self.roi_ctrl_grpbx.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Fixed
         )
-        roiCtrlLayout = QGridLayout(self.roi_ctrl_grpbx)
-        roiCtrlLayout.addWidget(QLabel("Point:"), 0, 0)
-        roiCtrlLayout.addWidget(self.roi_idx_cmbbx, 0, 1, 1, 2)
-        roiCtrlLayout.addWidget(QLabel("Name:"), 1, 0)
-        roiCtrlLayout.addWidget(self.roi_name_ledit, 1, 1, 1, 1)
-        roiCtrlLayout.addWidget(self.roi_showName_chbx, 1, 2, 1, 1)
-        roiCtrlLayout.addWidget(QLabel("Color:"), 2, 0)
-        roiCtrlLayout.addWidget(self.roi_color_cmbbx, 2, 1, 1, 2)
-        roiCtrlLayout.addWidget(QLabel("Edit range:"), 3, 0)
-        roiCtrlLayout.addWidget(self.roi_editRange_cmbbx, 3, 1, 1, 2)
-        roiCtrlLayout.addWidget(QLabel("x:"), 4, 0)
-        roiCtrlLayout.addWidget(self.roi_x_spbx, 4, 1)
-        roiCtrlLayout.addWidget(QLabel("y:"), 5, 0)
-        roiCtrlLayout.addWidget(self.roi_y_spbx, 5, 1)
-        roiCtrlLayout.addWidget(self.roi_erase_btn, 5, 2)
-        roiCtrlLayout.addWidget(QLabel("Radius:"), 6, 0)
-        roiCtrlLayout.addWidget(self.roi_rad_spbx, 6, 1)
-        roiCtrlLayout.addWidget(self.roi_rad_applyAll_btn, 6, 2)
-        roiCtrlLayout.addWidget(QLabel("Aggregation:"), 7, 0)
-        roiCtrlLayout.addWidget(self.roi_aggfunc_cmbbx, 7, 1, 1, 2)
-        roiCtrlLayout.addWidget(self.roi_val_lab, 8, 0, 1, 1)
-        roiCtrlLayout.addWidget(self.roi_jump_min_btn, 8, 1, 1, 1)
-        roiCtrlLayout.addWidget(self.roi_jump_max_btn, 8, 2, 1, 1)
-        roiCtrlLayout.addWidget(self.roi_online_plot_chbx, 9, 0, 1, 2)
-        roiCtrlLayout.addWidget(self.roi_plot_btn, 9, 2, 1, 1)
-        # roiCtrlLayout.addWidget(self.roi_LPF_lb, 10, 0, 1, 2)
-        # roiCtrlLayout.addWidget(self.roi_LPF_thresh_spbx, 10, 2, 1, 1)
-        roiCtrlLayout.addWidget(self.roi_delete_btn, 11, 2, 1, 1)
+        roiCtrlLayout = QVBoxLayout(self.roi_ctrl_grpbx)
+        roiCtrlLayout.setContentsMargins(6, 4, 6, 6)
+        roiCtrlLayout.setSpacing(4)
+
+        row_point = QHBoxLayout()
+        row_point.setContentsMargins(0, 0, 0, 0)
+        row_point.setSpacing(4)
+        row_point.addWidget(QLabel("Point:"))
+        row_point.addWidget(self.roi_idx_cmbbx)
+        row_point.addWidget(self.roi_showTemp_chbx)
+        row_point.addStretch()
+        row_point.addWidget(self.roi_delete_btn)
+        roiCtrlLayout.addLayout(row_point)
+
+        row_name = QHBoxLayout()
+        row_name.setContentsMargins(0, 0, 0, 0)
+        row_name.setSpacing(4)
+        row_name.addWidget(QLabel("Name:"))
+        row_name.addWidget(self.roi_name_ledit)
+        row_name.addWidget(self.roi_showName_chbx)
+        roiCtrlLayout.addLayout(row_name)
+
+        row_color = QHBoxLayout()
+        row_color.setContentsMargins(0, 0, 0, 0)
+        row_color.setSpacing(4)
+        row_color.addWidget(QLabel("Color:"))
+        row_color.addWidget(self.roi_color_cmbbx)
+        row_color.addWidget(QLabel("Edit range:"))
+        row_color.addWidget(self.roi_editRange_cmbbx)
+        roiCtrlLayout.addLayout(row_color)
+
+        row_pos = QHBoxLayout()
+        row_pos.setContentsMargins(0, 0, 0, 0)
+        row_pos.setSpacing(4)
+        row_pos.addWidget(QLabel("x / y / rad:"))
+        row_pos.addWidget(self.roi_x_spbx)
+        row_pos.addWidget(self.roi_y_spbx)
+        row_pos.addWidget(self.roi_rad_spbx)
+        roiCtrlLayout.addLayout(row_pos)
+
+        row_pos_actions = QHBoxLayout()
+        row_pos_actions.setContentsMargins(0, 0, 0, 0)
+        row_pos_actions.setSpacing(4)
+        row_pos_actions.addStretch()
+        row_pos_actions.addWidget(self.roi_erase_btn)
+        row_pos_actions.addStretch()
+        row_pos_actions.addWidget(self.roi_rad_applyAll_btn)
+        roiCtrlLayout.addLayout(row_pos_actions)
+
+        row_agg = QHBoxLayout()
+        row_agg.setContentsMargins(0, 0, 0, 0)
+        row_agg.setSpacing(4)
+        row_agg.addWidget(QLabel("Aggregation:"))
+        row_agg.addWidget(self.roi_aggfunc_cmbbx)
+        row_agg.addStretch()
+        row_agg.addWidget(self.roi_val_lab)
+        row_agg.addWidget(self.roi_jump_min_btn)
+        row_agg.addWidget(self.roi_jump_max_btn)
+        roiCtrlLayout.addLayout(row_agg)
+
+        row_lpf = QHBoxLayout()
+        row_lpf.setContentsMargins(0, 0, 0, 0)
+        row_lpf.setSpacing(4)
+        row_lpf.addWidget(self.roi_LPF_lb)
+        row_lpf.addWidget(self.roi_LPF_enable_chbx)
+        row_lpf.addWidget(self.roi_LPF_thresh_spbx)
+        row_lpf.addStretch()
+        row_lpf.addWidget(self.roi_jump_outlier_btn)
+        roiCtrlLayout.addLayout(row_lpf)
+
         self.roi_ctrl_grpbx.resize(self.roi_ctrl_grpbx.sizeHint())
 
         # --- Place the frames ---
@@ -3526,8 +4377,15 @@ class MainWindow(QMainWindow):
         thermalCtrlLayout.addLayout(thermalCtrlUpperLayout)
         thermalCtrlLayout.addWidget(self.roi_ctrl_grpbx)
 
-        thermalCtrlLayout.addWidget(self.roi_load_btn)
-        thermalCtrlLayout.addWidget(self.roi_export_btn)
+        roiLoadExportLayout = QHBoxLayout()
+        roiLoadExportLayout.setContentsMargins(0, 0, 0, 0)
+        roiLoadExportLayout.setSpacing(4)
+        roiLoadExportLayout.addWidget(self.roi_online_plot_chbx)
+        roiLoadExportLayout.addWidget(self.roi_plot_btn)
+        roiLoadExportLayout.addStretch()
+        roiLoadExportLayout.addWidget(self.roi_load_btn)
+        roiLoadExportLayout.addWidget(self.roi_export_btn)
+        thermalCtrlLayout.addLayout(roiLoadExportLayout)
 
         # --- Thermal image widgets layout ---
         thermalFrame = QFrame()
@@ -3541,6 +4399,7 @@ class MainWindow(QMainWindow):
         thermalOpenLayout.addWidget(self.loadThermalDataBtn)
         thermalOpenLayout.addWidget(self.unloadThermalDataBtn)
         thermalOpenLayout.addWidget(self.exportThermalDataVideoBtn)
+        thermalOpenLayout.addWidget(self.exportTrackingVideoBtn)
         thermalLayout.addLayout(thermalOpenLayout)
 
         thermalLayout.addWidget(self.thermalDispImg)
@@ -3639,18 +4498,18 @@ class MainWindow(QMainWindow):
         fileMenu = menuBar.addMenu("&File")
 
         # Load
-        loadSettingAction = QAction("&Load woking state", self)
+        loadSettingAction = QAction("&Load working state", self)
         loadSettingAction.setShortcut("Ctrl+L")
-        loadSettingAction.setStatusTip("Load woking state")
+        loadSettingAction.setStatusTip("Load working state")
         loadSettingAction.triggered.connect(
             partial(self.model.load_status, fname=None)
         )
         fileMenu.addAction(loadSettingAction)
 
         # Save
-        saveSettingAction = QAction("&Save woking state", self)
+        saveSettingAction = QAction("&Save working state", self)
         saveSettingAction.setShortcut("Ctrl+S")
-        saveSettingAction.setStatusTip("Save woking state")
+        saveSettingAction.setStatusTip("Save working state")
         saveSettingAction.triggered.connect(
             partial(self.model.save_status, fname=None)
         )
@@ -3659,11 +4518,18 @@ class MainWindow(QMainWindow):
         # Set DATA_ROOT
         setDataRootAction = QAction("&Set data root", self)
         setDataRootAction.setShortcut("Ctrl+D")
-        setDataRootAction.setStatusTip("Load woking state")
+        setDataRootAction.setStatusTip("Load working state")
         setDataRootAction.triggered.connect(
             partial(self.model.set_data_root, data_dir=None)
         )
         fileMenu.addAction(setDataRootAction)
+
+        exportTrackingAction = QAction("&Export tracking video", self)
+        exportTrackingAction.setStatusTip("Export tracking overlay video")
+        exportTrackingAction.triggered.connect(
+            self.model.export_tracking_video
+        )
+        fileMenu.addAction(exportTrackingAction)
 
         # Exit
         exitAction = QAction("&Exit", self)
@@ -3671,6 +4537,26 @@ class MainWindow(QMainWindow):
         exitAction.setStatusTip("Exit application")
         exitAction.triggered.connect(self.exitCall)
         fileMenu.addAction(exitAction)
+
+        # -- Edit menu --
+        editMenu = menuBar.addMenu("&Edit")
+
+        self.undoAction = QAction("Undo", self)
+        self.undoAction.setShortcut(QKeySequence.Undo)
+        self.undoAction.setStatusTip("Undo recent point edit")
+        self.undoAction.setEnabled(False)
+        self.undoAction.triggered.connect(self.model.undo_edit)
+        editMenu.addAction(self.undoAction)
+
+        self.redoAction = QAction("Redo", self)
+        self.redoAction.setShortcut(QKeySequence.Redo)
+        self.redoAction.setStatusTip("Redo recent point edit")
+        self.redoAction.setEnabled(False)
+        self.redoAction.triggered.connect(self.model.redo_edit)
+        editMenu.addAction(self.redoAction)
+
+        # Sync initial enabled state
+        self.model._update_undo_redo_actions()
 
         # -- DLC menu --
         dlcMenu = menuBar.addMenu("&DLC")
@@ -3777,29 +4663,6 @@ class MainWindow(QMainWindow):
         action.setStatusTip("Load positions tracked by DeepLabCut")
         action.triggered.connect(self.model.load_tracking)
         dlcMenu.addAction(action)
-
-        # -- Filter menu --
-        filterMenu = menuBar.addMenu("Filter")
-
-        # Show Focus level
-        showFocusAction = QAction("Show Image Focus Level", self)
-        showFocusAction.setStatusTip("Show blurring level")
-        showFocusAction.triggered.connect(self.model.show_focus)
-        filterMenu.addAction(showFocusAction)
-
-        # Filter Focus
-        focusFilterAction = QAction("Image Focus filter", self)
-        focusFilterAction.setStatusTip("Filtering blurred frames")
-        focusFilterAction.triggered.connect(self.model.focus_filter)
-        filterMenu.addAction(focusFilterAction)
-
-        # Filter Temprature outlier
-        tempOutlierFilterAction = QAction("Temperature outlier", self)
-        tempOutlierFilterAction.setStatusTip("Remove temperature outliers")
-        tempOutlierFilterAction.triggered.connect(
-            self.model.remove_temprature_outlier
-        )
-        filterMenu.addAction(tempOutlierFilterAction)
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def thermal_cbar_lab_resizeEvent(self, ev):
@@ -3944,7 +4807,8 @@ class MainWindow(QMainWindow):
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def exitCall(self):
         self.close()
-        sys.exit(app.exec_())
+        # Avoid re-entering the Qt event loop; just request application quit
+        QApplication.quit()
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def closeEvent(self, event):
@@ -3988,8 +4852,15 @@ if __name__ == "__main__":
     win = MainWindow()
 
     # --- Set initial window size ---
-    win.resize(1440, 920)
-    win.move(0, 0)
+    screen = app.primaryScreen()
+    if screen is not None:
+        available = screen.availableGeometry()
+        target_w = min(1920, available.width())
+        target_h = min(1080, available.height())
+        win.resize(target_w, target_h)
+        win.move(available.x(), available.y())
+    else:
+        win.resize(1280, 720)
     win.show()
     ret = app.exec()
     sys.exit(ret)
