@@ -2353,6 +2353,8 @@ class ThermalVideoModel(QObject):
             self.main_win.plot_ax_temp.set_ylabel("Temp (°C)")
             self.main_win.plot_ax_x.set_ylabel("X (px)")
             self.main_win.plot_ax_y.set_ylabel("Y (px)")
+            if not self.main_win.plot_ax_y.yaxis_inverted():
+                self.main_win.plot_ax_y.invert_yaxis()
 
         if (
             self.main_win.plot_xvals is None
@@ -4117,6 +4119,7 @@ class MainWindow(QMainWindow):
             3, 1, sharex=True
         )
         self.plot_ax_temp, self.plot_ax_x, self.plot_ax_y = self.plot_axes
+        self.plot_ax_y.invert_yaxis()  # match top-left image origin
         self.roi_plot_canvas.figure.subplots_adjust(
             left=0.08, bottom=0.1, right=0.94, top=0.96, hspace=0.12
         )
