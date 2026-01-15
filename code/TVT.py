@@ -154,11 +154,19 @@ class TrackingPoint:
     """
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def __init__(self, dataMovie, name="", x=np.nan, y=np.nan):
+    def __init__(
+        self, dataMovie, name="", x=np.nan, y=np.nan, data_length=None
+    ):
         self.dataMovie = dataMovie
         self.name = name
-        self.frequency = self.dataMovie.frame_rate
-        data_length = self.dataMovie.duration_frame
+        self.frequency = getattr(self.dataMovie, "frame_rate", 0)
+
+        if data_length is None:
+            raw_len = getattr(self.dataMovie, "duration_frame", 0) or 0
+            data_length = max(0, int(raw_len))
+        else:
+            data_length = max(0, int(data_length))
+
         self.x = np.ones(data_length) * x
         self.y = np.ones(data_length) * y
         self.radius = (
@@ -854,7 +862,9 @@ class ThermalVideoModel(QObject):
             self.main_win.thermalDispImg.tracking_mark = self.tracking_mark
         self.editRange = "current"
 
-        self.lpf_hz = 0.0  # Hz, 0 == no filter
+        self.lpf_temp_hz = 0.0  # Hz, 0 == no filter
+        self.lpf_pos_hz = 0.0  # Hz, 0 == no filter
+        self.lpf_hz = 0.0
 
         # --- Common time (ms), movie parameters ------------------------------
         self.common_time_ms = 0
@@ -1137,6 +1147,8 @@ class ThermalVideoModel(QObject):
             self.main_win.plot_line_lpf = {}
             self.main_win.plot_line_x = {}
             self.main_win.plot_line_y = {}
+            self.main_win.plot_line_x_lpf = {}
+            self.main_win.plot_line_y_lpf = {}
             self.main_win.plot_timeline = None
             self.main_win.plot_marker_line = {}
             self.main_win.roi_plot_canvas.setEnabled(False)
@@ -1229,6 +1241,8 @@ class ThermalVideoModel(QObject):
             self.main_win.plot_line_lpf = {}
             self.main_win.plot_line_x = {}
             self.main_win.plot_line_y = {}
+            self.main_win.plot_line_x_lpf = {}
+            self.main_win.plot_line_y_lpf = {}
             self.main_win.plot_timeline = None
             self.main_win.plot_marker_line = {}
             self.main_win.roi_plot_canvas.setEnabled(False)
@@ -2271,30 +2285,22 @@ class ThermalVideoModel(QObject):
         if xpos is not None:
             self.set_common_time(time_ms=xpos * 1000)
 
-    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    def plot_timecourse(
-        self,
-        plot_all_points=False,
-        update_all_data=False,
-        update_plot=False,
-        skip_value_update=False,
-        *args,
-        **kwargs,
-    ):
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def _get_lpf_setting(self, spinbox_attr, checkbox_attr):
+        """Read LPF setting from UI spinbox/checkbox and normalize limits."""
+
         lpf_thresh = 0.0
-        lpf_enabled = True
-        # Adapt LPF resolution to sampling rate and record length
-        if (
-            hasattr(self.main_win, "roi_LPF_thresh_spbx")
-            and self.thermalData.loaded
-        ):
+        enabled = True
+        sp = getattr(self.main_win, spinbox_attr, None)
+        cb = getattr(self.main_win, checkbox_attr, None)
+
+        if sp is not None and self.thermalData.loaded:
             frame_rate = getattr(self.thermalData, "frame_rate", 0) or 0
             n_frames = getattr(self.thermalData, "duration_frame", 0) or 0
             if frame_rate > 0 and n_frames > 0:
                 nyq = frame_rate / 2.0
                 df = frame_rate / max(1, n_frames)
                 decimals = int(np.clip(np.ceil(-np.log10(df)) + 1, 1, 6))
-                sp = self.main_win.roi_LPF_thresh_spbx
                 sp.blockSignals(True)
                 sp.setDecimals(decimals)
                 sp.setSingleStep(df)
@@ -2305,15 +2311,36 @@ class ThermalVideoModel(QObject):
                 lpf_thresh = sp.value()
                 sp.blockSignals(False)
             else:
-                lpf_thresh = self.main_win.roi_LPF_thresh_spbx.value()
-        if hasattr(self.main_win, "roi_LPF_enable_chbx"):
-            lpf_enabled = (
-                self.main_win.roi_LPF_enable_chbx.checkState()
-                != Qt.CheckState.Unchecked
-            )
-        if not lpf_enabled:
+                lpf_thresh = sp.value()
+
+        if cb is not None:
+            enabled = cb.checkState() != Qt.CheckState.Unchecked
+
+        if not enabled:
             lpf_thresh = 0.0
-        self.lpf_hz = lpf_thresh
+
+        return lpf_thresh, enabled
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    def plot_timecourse(
+        self,
+        plot_all_points=False,
+        update_all_data=False,
+        update_plot=False,
+        skip_value_update=False,
+        *args,
+        **kwargs,
+    ):
+        temp_lpf_hz, temp_lpf_enabled = self._get_lpf_setting(
+            "roi_LPF_thresh_spbx", "roi_LPF_enable_chbx"
+        )
+        pos_lpf_hz, pos_lpf_enabled = self._get_lpf_setting(
+            "roi_pos_LPF_thresh_spbx", "roi_pos_LPF_enable_chbx"
+        )
+
+        self.lpf_temp_hz = temp_lpf_hz
+        self.lpf_pos_hz = pos_lpf_hz
+        self.lpf_hz = temp_lpf_hz
 
         # --- Set xvals in time -----------------------------------------------
         if self.main_win.plot_xvals is None:
@@ -2419,6 +2446,10 @@ class ThermalVideoModel(QObject):
         existing_lines = set(self.main_win.plot_line.keys())
         existing_lines |= set(self.main_win.plot_line_x.keys())
         existing_lines |= set(self.main_win.plot_line_y.keys())
+        if hasattr(self.main_win, "plot_line_x_lpf"):
+            existing_lines |= set(self.main_win.plot_line_x_lpf.keys())
+        if hasattr(self.main_win, "plot_line_y_lpf"):
+            existing_lines |= set(self.main_win.plot_line_y_lpf.keys())
         for line in list(existing_lines):
             if line not in all_points:
                 rm_lines.append(line)
@@ -2449,6 +2480,18 @@ class ThermalVideoModel(QObject):
                 ):
                     self.main_win.plot_line_y[line].remove()
                     del self.main_win.plot_line_y[line]
+                if (
+                    hasattr(self.main_win, "plot_line_x_lpf")
+                    and line in self.main_win.plot_line_x_lpf
+                ):
+                    self.main_win.plot_line_x_lpf[line].remove()
+                    del self.main_win.plot_line_x_lpf[line]
+                if (
+                    hasattr(self.main_win, "plot_line_y_lpf")
+                    and line in self.main_win.plot_line_y_lpf
+                ):
+                    self.main_win.plot_line_y_lpf[line].remove()
+                    del self.main_win.plot_line_y_lpf[line]
 
         # Check color change
         update_color = False
@@ -2476,13 +2519,10 @@ class ThermalVideoModel(QObject):
             # Update tracking_point values
             for point in Points:
                 self.tracking_point[point].update_all_values()
-        elif (
-            self.main_win.roi_online_plot_chbx.checkState()
-            != Qt.CheckState.Unchecked
-        ) and not skip_value_update:
+        elif not skip_value_update:
             # Update current data
             for point_name in Points:
-                self.tracking_point[point].get_value(
+                self.tracking_point[point_name].get_value(
                     [self.thermalData.frame_position], force_update=True
                 )
         elif not (update_color or update_plot):
@@ -2503,18 +2543,17 @@ class ThermalVideoModel(QObject):
             temp_ts = np.asarray(
                 self.tracking_point[point].value_ts, dtype=float
             )
-            lpf_ts = None
-            if lpf_thresh > 0.0 and show_temp:
+            lpf_temp_ts = None
+            if temp_lpf_hz > 0.0 and show_temp:
                 xi0 = np.argwhere(np.logical_not(np.isnan(temp_ts))).ravel()
-                lpf_ts = np.ones(len(temp_ts)) * np.nan
+                lpf_temp_ts = np.ones(len(temp_ts)) * np.nan
                 if len(xi0) > 1:
                     y0 = temp_ts[xi0]
                     si = 1.0 / self.tracking_point[point].frequency
-                    lpf_ts[np.min(xi0): np.max(xi0) + 1] = self.InterpLPF(
-                        y0, xi0, si, lpf_thresh
-                    )
-                    # Respect missing data: keep NaN where original was NaN
-                    lpf_ts[np.isnan(temp_ts)] = np.nan
+                    lpf_temp_ts[
+                        np.min(xi0): np.max(xi0) + 1
+                    ] = self.InterpLPF(y0, xi0, si, temp_lpf_hz)
+                    lpf_temp_ts[np.isnan(temp_ts)] = np.nan
 
             # Temperature line handling (visible toggle)
             if show_temp:
@@ -2534,9 +2573,11 @@ class ThermalVideoModel(QObject):
                 self.main_win.plot_line[point].set_ls(ls)
                 self.main_win.plot_line[point].set_ydata(temp_ts.copy())
 
-                if lpf_thresh > 0.0 and lpf_ts is not None:
+                if temp_lpf_hz > 0.0 and lpf_temp_ts is not None:
                     if point in self.main_win.plot_line_lpf:
-                        self.main_win.plot_line_lpf[point].set_ydata(lpf_ts)
+                        self.main_win.plot_line_lpf[point].set_ydata(
+                            lpf_temp_ts
+                        )
                         self.main_win.plot_line_lpf[point].set_color(col)
                         self.main_win.plot_line_lpf[point].set_alpha(0.35)
                         self.main_win.plot_line_lpf[point].set_linewidth(3.0)
@@ -2545,7 +2586,7 @@ class ThermalVideoModel(QObject):
                         self.main_win.plot_line_lpf[point] = (
                             self.main_win.plot_ax_temp.plot(
                                 self.main_win.plot_xvals,
-                                lpf_ts,
+                                lpf_temp_ts,
                                 "-",
                                 lw=3.0,
                                 color=col,
@@ -2565,11 +2606,35 @@ class ThermalVideoModel(QObject):
                     del self.main_win.plot_line_lpf[point]
 
             # X/Y tracks (always shown)
+            x_ts = np.asarray(self.tracking_point[point].x, dtype=float)
+            y_ts = np.asarray(self.tracking_point[point].y, dtype=float)
+            lpf_x_ts = None
+            lpf_y_ts = None
+            if pos_lpf_hz > 0.0:
+                xi0 = np.argwhere(~np.isnan(x_ts)).ravel()
+                yi0 = np.argwhere(~np.isnan(y_ts)).ravel()
+                if len(xi0) > 1:
+                    lpf_x_ts = np.ones(len(x_ts)) * np.nan
+                    y0 = x_ts[xi0]
+                    si = 1.0 / self.tracking_point[point].frequency
+                    lpf_x_ts[
+                        np.min(xi0): np.max(xi0) + 1
+                    ] = self.InterpLPF(y0, xi0, si, pos_lpf_hz)
+                    lpf_x_ts[np.isnan(x_ts)] = np.nan
+                if len(yi0) > 1:
+                    lpf_y_ts = np.ones(len(y_ts)) * np.nan
+                    y0 = y_ts[yi0]
+                    si = 1.0 / self.tracking_point[point].frequency
+                    lpf_y_ts[
+                        np.min(yi0): np.max(yi0) + 1
+                    ] = self.InterpLPF(y0, yi0, si, pos_lpf_hz)
+                    lpf_y_ts[np.isnan(y_ts)] = np.nan
+
             if point not in self.main_win.plot_line_x:
                 self.main_win.plot_line_x[point] = (
                     self.main_win.plot_ax_x.plot(
                         self.main_win.plot_xvals,
-                        self.tracking_point[point].x,
+                        x_ts,
                         ls,
                         lw=1,
                         color=col,
@@ -2580,7 +2645,7 @@ class ThermalVideoModel(QObject):
                 self.main_win.plot_line_y[point] = (
                     self.main_win.plot_ax_y.plot(
                         self.main_win.plot_xvals,
-                        self.tracking_point[point].y,
+                        y_ts,
                         ls,
                         lw=1,
                         color=col,
@@ -2590,21 +2655,73 @@ class ThermalVideoModel(QObject):
 
             self.main_win.plot_line_x[point].set_color(col)
             self.main_win.plot_line_x[point].set_ls(ls)
-            self.main_win.plot_line_x[point].set_ydata(
-                self.tracking_point[point].x.copy()
-            )
+            self.main_win.plot_line_x[point].set_ydata(x_ts.copy())
 
             self.main_win.plot_line_y[point].set_color(col)
             self.main_win.plot_line_y[point].set_ls(ls)
-            self.main_win.plot_line_y[point].set_ydata(
-                self.tracking_point[point].y.copy()
-            )
+            self.main_win.plot_line_y[point].set_ydata(y_ts.copy())
+
+            if pos_lpf_hz > 0.0 and lpf_x_ts is not None:
+                if point in self.main_win.plot_line_x_lpf:
+                    self.main_win.plot_line_x_lpf[point].set_ydata(
+                        lpf_x_ts
+                    )
+                    self.main_win.plot_line_x_lpf[point].set_color(col)
+                    self.main_win.plot_line_x_lpf[point].set_alpha(0.35)
+                    self.main_win.plot_line_x_lpf[point].set_linewidth(3.0)
+                else:
+                    self.main_win.plot_line_x_lpf[point] = (
+                        self.main_win.plot_ax_x.plot(
+                            self.main_win.plot_xvals,
+                            lpf_x_ts,
+                            "-",
+                            lw=3.0,
+                            color=col,
+                            alpha=0.35,
+                        )[0]
+                    )
+            elif point in self.main_win.plot_line_x_lpf:
+                self.main_win.plot_line_x_lpf[point].remove()
+                del self.main_win.plot_line_x_lpf[point]
+
+            if pos_lpf_hz > 0.0 and lpf_y_ts is not None:
+                if point in self.main_win.plot_line_y_lpf:
+                    self.main_win.plot_line_y_lpf[point].set_ydata(
+                        lpf_y_ts
+                    )
+                    self.main_win.plot_line_y_lpf[point].set_color(col)
+                    self.main_win.plot_line_y_lpf[point].set_alpha(0.35)
+                    self.main_win.plot_line_y_lpf[point].set_linewidth(3.0)
+                else:
+                    self.main_win.plot_line_y_lpf[point] = (
+                        self.main_win.plot_ax_y.plot(
+                            self.main_win.plot_xvals,
+                            lpf_y_ts,
+                            "-",
+                            lw=3.0,
+                            color=col,
+                            alpha=0.35,
+                        )[0]
+                    )
+            elif point in self.main_win.plot_line_y_lpf:
+                self.main_win.plot_line_y_lpf[point].remove()
+                del self.main_win.plot_line_y_lpf[point]
 
         # Remove all LPF lines if LPF disabled globally
-        if not lpf_enabled and len(self.main_win.plot_line_lpf):
+        if not temp_lpf_enabled and len(self.main_win.plot_line_lpf):
             for line in list(self.main_win.plot_line_lpf.values()):
                 line.remove()
             self.main_win.plot_line_lpf.clear()
+
+        if (not pos_lpf_enabled or pos_lpf_hz == 0.0) and (
+            hasattr(self.main_win, "plot_line_x_lpf")
+        ):
+            for line in list(self.main_win.plot_line_x_lpf.values()):
+                line.remove()
+            for line in list(self.main_win.plot_line_y_lpf.values()):
+                line.remove()
+            self.main_win.plot_line_x_lpf.clear()
+            self.main_win.plot_line_y_lpf.clear()
 
         for ax in self.main_win.plot_axes:
             ax.relim()
@@ -2834,11 +2951,23 @@ class ThermalVideoModel(QObject):
                 self.tracking_point[point].update_all_values()
 
         # Initialize saving data frame
-        lpf_cutoff = self.main_win.roi_LPF_thresh_spbx.value()
+        temp_lpf_cutoff = self.main_win.roi_LPF_thresh_spbx.value()
+        pos_lpf_cutoff = self.main_win.roi_pos_LPF_thresh_spbx.value()
         cols = pd.MultiIndex.from_product([[""], ["time_ms", "marker"]])
         cols = cols.append(
             pd.MultiIndex.from_product(
-                [Points, ["x", "y", "radius", "temp", "temp_lpf"]]
+                [
+                    Points,
+                    [
+                        "x",
+                        "y",
+                        "x_lpf",
+                        "y_lpf",
+                        "radius",
+                        "temp",
+                        "temp_lpf",
+                    ],
+                ]
             )
         )
         saveData = pd.DataFrame(columns=cols)
@@ -2863,17 +2992,39 @@ class ThermalVideoModel(QObject):
             ].radius
             temp = self.tracking_point[point].value_ts
             saveData.loc[:, (point, "temp")] = temp
+            lpf_x_ts = np.ones(len(temp)) * np.nan
+            lpf_y_ts = np.ones(len(temp)) * np.nan
+            if pos_lpf_cutoff > 0.0:
+                x_ts = np.asarray(self.tracking_point[point].x, dtype=float)
+                y_ts = np.asarray(self.tracking_point[point].y, dtype=float)
+                xi0 = np.argwhere(np.logical_not(np.isnan(x_ts))).ravel()
+                yi0 = np.argwhere(np.logical_not(np.isnan(y_ts))).ravel()
+                if len(xi0) > 1:
+                    si = 1.0 / self.tracking_point[point].frequency
+                    lpf_x_ts[np.min(xi0): np.max(xi0) + 1] = self.InterpLPF(
+                        x_ts[xi0], xi0, si, pos_lpf_cutoff
+                    )
+                    lpf_x_ts[np.isnan(x_ts)] = np.nan
+                if len(yi0) > 1:
+                    si = 1.0 / self.tracking_point[point].frequency
+                    lpf_y_ts[np.min(yi0): np.max(yi0) + 1] = self.InterpLPF(
+                        y_ts[yi0], yi0, si, pos_lpf_cutoff
+                    )
+                    lpf_y_ts[np.isnan(y_ts)] = np.nan
+            saveData.loc[:, (point, "x_lpf")] = lpf_x_ts
+            saveData.loc[:, (point, "y_lpf")] = lpf_y_ts
 
-            if lpf_cutoff > 0.0:
+            lpf_temp_ts = np.ones(len(temp)) * np.nan
+            if temp_lpf_cutoff > 0.0:
                 xi0 = np.argwhere(np.logical_not(np.isnan(temp))).ravel()
-                lpf_ts = np.ones(len(temp)) * np.nan
                 if len(xi0) > 1:
                     y0 = temp[xi0]
                     si = 1.0 / self.tracking_point[point].frequency
-                    lpf_ts[np.min(xi0):np.max(xi0) + 1] = self.InterpLPF(
-                        y0, xi0, si, lpf_cutoff
-                    )
-                saveData.loc[:, (point, "temp_lpf")] = lpf_ts
+                    lpf_temp_ts[
+                        np.min(xi0):np.max(xi0) + 1
+                    ] = self.InterpLPF(y0, xi0, si, temp_lpf_cutoff)
+                    lpf_temp_ts[np.isnan(temp)] = np.nan
+            saveData.loc[:, (point, "temp_lpf")] = lpf_temp_ts
 
         # Save as csv
         saveData.to_csv(fname, quoting=csv.QUOTE_NONNUMERIC)
@@ -2890,7 +3041,12 @@ class ThermalVideoModel(QObject):
         with open(fname, "r") as fd:
             C = fd.read()
 
-        meta = {"lpf_hz": lpf_cutoff, "points": point_property}
+        meta = {
+            "lpf_hz": temp_lpf_cutoff,
+            "lpf_temp_hz": temp_lpf_cutoff,
+            "lpf_xy_hz": pos_lpf_cutoff,
+            "points": point_property,
+        }
         C = f"# TVT export,{str(meta)}\n" + C
         with open(fname, "w") as fd:
             fd.write(C)
@@ -3148,15 +3304,29 @@ class ThermalVideoModel(QObject):
                 meta = ast.literal_eval(meta_str)
                 if isinstance(meta, dict):
                     point_property = meta.get("points", meta) or {}
-                    lpf_from_file = meta.get("lpf_hz")
-                    if lpf_from_file is not None:
+                    temp_lpf_from_file = meta.get(
+                        "lpf_temp_hz", meta.get("lpf_hz")
+                    )
+                    pos_lpf_from_file = meta.get(
+                        "lpf_xy_hz", meta.get("lpf_pos_hz")
+                    )
+                    if temp_lpf_from_file is not None:
                         sp = self.main_win.roi_LPF_thresh_spbx
                         cb = self.main_win.roi_LPF_enable_chbx
                         sp.blockSignals(True)
-                        sp.setValue(float(lpf_from_file))
+                        sp.setValue(float(temp_lpf_from_file))
                         sp.blockSignals(False)
                         cb.blockSignals(True)
-                        cb.setChecked(lpf_from_file > 0)
+                        cb.setChecked(temp_lpf_from_file > 0)
+                        cb.blockSignals(False)
+                    if pos_lpf_from_file is not None:
+                        sp = self.main_win.roi_pos_LPF_thresh_spbx
+                        cb = self.main_win.roi_pos_LPF_enable_chbx
+                        sp.blockSignals(True)
+                        sp.setValue(float(pos_lpf_from_file))
+                        sp.blockSignals(False)
+                        cb.blockSignals(True)
+                        cb.setChecked(pos_lpf_from_file > 0)
                         cb.blockSignals(False)
             except Exception:
                 meta = {}
@@ -3187,7 +3357,7 @@ class ThermalVideoModel(QObject):
                     self.main_win,
                     "Likelihood",
                     "Likelihood threshold:",
-                    value=min(0.95, max_lh),
+                    value=min(0.5, max_lh),
                     minValue=0.0,
                     maxValue=max_lh,
                     decimals=2,
@@ -3474,6 +3644,12 @@ class ThermalVideoModel(QObject):
             self.main_win.roi_LPF_enable_chbx.checkState()
         )
         settings["lpf_thresh"] = self.main_win.roi_LPF_thresh_spbx.value()
+        settings["pos_lpf_enabled"] = (
+            self.main_win.roi_pos_LPF_enable_chbx.checkState()
+        )
+        settings["pos_lpf_thresh"] = (
+            self.main_win.roi_pos_LPF_thresh_spbx.value()
+        )
 
         # --- Convert Path to relative to DATA_ROOT ---
         def path_to_rel(param):
@@ -3605,6 +3781,22 @@ class ThermalVideoModel(QObject):
             self.main_win.roi_LPF_thresh_spbx.setValue(settings["lpf_thresh"])
             self.main_win.roi_LPF_thresh_spbx.blockSignals(False)
             del settings["lpf_thresh"]
+
+        if "pos_lpf_enabled" in settings:
+            self.main_win.roi_pos_LPF_enable_chbx.blockSignals(True)
+            self.main_win.roi_pos_LPF_enable_chbx.setCheckState(
+                settings["pos_lpf_enabled"]
+            )
+            self.main_win.roi_pos_LPF_enable_chbx.blockSignals(False)
+            del settings["pos_lpf_enabled"]
+
+        if "pos_lpf_thresh" in settings:
+            self.main_win.roi_pos_LPF_thresh_spbx.blockSignals(True)
+            self.main_win.roi_pos_LPF_thresh_spbx.setValue(
+                settings["pos_lpf_thresh"]
+            )
+            self.main_win.roi_pos_LPF_thresh_spbx.blockSignals(False)
+            del settings["pos_lpf_thresh"]
 
         # Load videoData
         if "videoData" in settings:
@@ -4084,12 +4276,10 @@ class MainWindow(QMainWindow):
         self.roi_jump_min_btn = QPushButton("to min")
         self.roi_jump_max_btn = QPushButton("to max")
 
-        self.roi_online_plot_chbx = QCheckBox("Online plot")
-        self.roi_online_plot_chbx.setChecked(True)
         self.roi_plot_btn = QPushButton("Reload all temp")
         self.roi_plot_btn.setStyleSheet("background:#ffa500; color:black;")
-        self.roi_LPF_lb = QLabel("Low-pass (Hz)")
-        self.roi_LPF_enable_chbx = QCheckBox("Show LPF")
+        self.roi_LPF_lb = QLabel("Temp LPF (Hz)")
+        self.roi_LPF_enable_chbx = QCheckBox("Show temp LPF")
         self.roi_LPF_enable_chbx.setChecked(True)
         self.roi_LPF_thresh_spbx = QDoubleSpinBox()
         self.roi_LPF_thresh_spbx.setDecimals(4)
@@ -4097,6 +4287,15 @@ class MainWindow(QMainWindow):
         self.roi_LPF_thresh_spbx.setValue(0.0)
         self.roi_LPF_thresh_spbx.setMinimum(0.0)
         self.roi_LPF_thresh_spbx.setMaximum(1000.0)
+        self.roi_pos_LPF_lb = QLabel("XY LPF (Hz)")
+        self.roi_pos_LPF_enable_chbx = QCheckBox("Show XY LPF")
+        self.roi_pos_LPF_enable_chbx.setChecked(True)
+        self.roi_pos_LPF_thresh_spbx = QDoubleSpinBox()
+        self.roi_pos_LPF_thresh_spbx.setDecimals(4)
+        self.roi_pos_LPF_thresh_spbx.setSingleStep(0.01)
+        self.roi_pos_LPF_thresh_spbx.setValue(0.0)
+        self.roi_pos_LPF_thresh_spbx.setMinimum(0.0)
+        self.roi_pos_LPF_thresh_spbx.setMaximum(1000.0)
         self.roi_jump_outlier_btn = QPushButton("Jump outlier")
 
         self.roi_delete_btn = QPushButton("Delete this point")
@@ -4129,6 +4328,8 @@ class MainWindow(QMainWindow):
         self.plot_line_lpf = {}
         self.plot_line_x = {}
         self.plot_line_y = {}
+        self.plot_line_x_lpf = {}
+        self.plot_line_y_lpf = {}
         self.plot_timeline = None
         self.plot_marker_line = {}
         self.roi_plot_canvas.setEnabled(False)
@@ -4239,6 +4440,13 @@ class MainWindow(QMainWindow):
             partial(self.model.plot_timecourse, update_plot=True)
         )
         self.roi_LPF_thresh_spbx.valueChanged.connect(
+            partial(self.model.plot_timecourse, update_plot=True)
+        )
+
+        self.roi_pos_LPF_enable_chbx.stateChanged.connect(
+            partial(self.model.plot_timecourse, update_plot=True)
+        )
+        self.roi_pos_LPF_thresh_spbx.valueChanged.connect(
             partial(self.model.plot_timecourse, update_plot=True)
         )
 
@@ -4354,10 +4562,25 @@ class MainWindow(QMainWindow):
         row_agg.addWidget(QLabel("Agg.:"))
         row_agg.addWidget(self.roi_aggfunc_cmbbx)
         row_agg.addStretch()
-        row_agg.addWidget(self.roi_LPF_lb)
-        row_agg.addWidget(self.roi_LPF_thresh_spbx)
-        row_agg.addWidget(self.roi_LPF_enable_chbx)
         roiCtrlLayout.addLayout(row_agg)
+
+        row_lpf_temp = QHBoxLayout()
+        row_lpf_temp.setContentsMargins(0, 0, 0, 0)
+        row_lpf_temp.setSpacing(4)
+        row_lpf_temp.addWidget(self.roi_LPF_lb)
+        row_lpf_temp.addWidget(self.roi_LPF_thresh_spbx)
+        row_lpf_temp.addWidget(self.roi_LPF_enable_chbx)
+        row_lpf_temp.addStretch()
+        roiCtrlLayout.addLayout(row_lpf_temp)
+
+        row_lpf_pos = QHBoxLayout()
+        row_lpf_pos.setContentsMargins(0, 0, 0, 0)
+        row_lpf_pos.setSpacing(4)
+        row_lpf_pos.addWidget(self.roi_pos_LPF_lb)
+        row_lpf_pos.addWidget(self.roi_pos_LPF_thresh_spbx)
+        row_lpf_pos.addWidget(self.roi_pos_LPF_enable_chbx)
+        row_lpf_pos.addStretch()
+        roiCtrlLayout.addLayout(row_lpf_pos)
 
         row_jump = QHBoxLayout()
         row_jump.setContentsMargins(0, 0, 0, 0)
@@ -4386,7 +4609,6 @@ class MainWindow(QMainWindow):
         roiLoadExportLayout = QHBoxLayout()
         roiLoadExportLayout.setContentsMargins(0, 0, 0, 0)
         roiLoadExportLayout.setSpacing(4)
-        roiLoadExportLayout.addWidget(self.roi_online_plot_chbx)
         roiLoadExportLayout.addWidget(self.roi_plot_btn)
         roiLoadExportLayout.addStretch()
         roiLoadExportLayout.addWidget(self.roi_load_btn)
