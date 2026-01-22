@@ -225,13 +225,18 @@ class TrackingPoint:
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     def update_all_values(self):
-        xyt = np.array(
-            [
-                xyt
-                for xyt in zip(self.x, self.y, np.arange(len(self.x)))
-                if ~np.any(np.isnan(xyt))
-            ]
-        )
+        xyt_list = [
+            coords
+            for coords in zip(self.x, self.y, np.arange(len(self.x)))
+            if ~np.any(np.isnan(coords))
+        ]
+
+        # If no valid coordinates, clear cached values and skip expensive reads
+        if len(xyt_list) == 0:
+            self.value_ts[:] = np.nan
+            return
+
+        xyt = np.asarray(xyt_list, dtype=float)
         vals = self.dataMovie.get_rois_dataseries(
             [xyt], [self.radius], aggfunc=[self.aggfunc]
         )
